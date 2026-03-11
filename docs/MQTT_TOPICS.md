@@ -1,6 +1,6 @@
 # MQTT Topics — Authoritative Reference
 
-## Purpose &amp; Scope
+## Purpose & Scope
 
 This document is the authoritative registry of all `highland/` MQTT topics. It defines what exists, who owns it, whether it's retained, and what its payload looks like.
 
@@ -674,6 +674,343 @@ Advisory was received but no delivery confirmation arrived by midnight. Non-term
 
 ---
 
+### Garage Door
+
+**Architecture:** The Konnected GDO blaQ is integrated via a Node-RED bridge — not the HA native ESPHome integration. The bridge subscribes to the Blaq's local SSE stream (`GET /events`) for push state updates and issues HTTP POSTs to the Blaq REST API for commands. HA never speaks to the device directly. See **GARAGE_DOOR.md** for full integration design.
+
+**Internal-only (never on the bus):**
+- Raw Blaq REST API responses
+- SSE raw event payloads
+- SSE connection state machine (`CONNECTING`, `CONNECTED`, `RECONNECTING`)
+- HTTP response codes from command calls
+
+---
+
+**`highland/state/garage/door`** ← RETAINED
+
+Current state of the garage door cover.
+
+| | |
+|--|--|
+| **Publisher** | Garage Bridge flow |
+| **Consumers** | HA (via MQTT Discovery), any flow with garage-aware behavior |
+| **Retained** | Yes |
+
+```json
+{
+  "timestamp": "2026-03-11T09:15:00Z",
+  "source": "garage_bridge",
+  "state": "CLOSED",
+  "current_operation": "IDLE"
+}
+```
+
+`state` values: `"OPEN"` | `"CLOSED"`
+`current_operation` values: `"IDLE"` | `"OPENING"` | `"CLOSING"`
+
+HA MQTT cover uses `value_template` on this topic. During travel, `current_operation` drives the OPENING/CLOSING display; `state` reflects the settled position.
+
+---
+
+**`highland/state/garage/light`** ← RETAINED
+
+| | |
+|--|--|
+| **Publisher** | Garage Bridge flow |
+| **Consumers** | HA (via MQTT Discovery) |
+| **Retained** | Yes |
+
+```json
+{
+  "timestamp": "2026-03-11T09:15:00Z",
+  "source": "garage_bridge",
+  "state": "OFF"
+}
+```
+
+`state` values: `"ON"` | `"OFF"`
+
+---
+
+**`highland/state/garage/remote_lock`** ← RETAINED
+
+State of the Security+ remote control lockout feature. When locked, all physical remotes and keypads are disabled at the opener. This is not a door lock.
+
+| | |
+|--|--|
+| **Publisher** | Garage Bridge flow |
+| **Consumers** | HA (via MQTT Discovery) |
+| **Retained** | Yes |
+
+```json
+{
+  "timestamp": "2026-03-11T09:15:00Z",
+  "source": "garage_bridge",
+  "state": "UNLOCKED"
+}
+```
+
+`state` values: `"LOCKED"` | `"UNLOCKED"`
+
+---
+
+**`highland/state/garage/obstruction`** ← RETAINED
+
+State of the safety beam sensor. `ON` means the beam is interrupted (obstruction present).
+
+| | |
+|--|--|
+| **Publisher** | Garage Bridge flow |
+| **Consumers** | HA (via MQTT Discovery), any flow managing door close sequences |
+| **Retained** | Yes |
+
+```json
+{
+  "timestamp": "2026-03-11T09:15:00Z",
+  "source": "garage_bridge",
+  "state": "OFF"
+}
+```
+
+`state` values: `"ON"` (obstructed) | `"OFF"` (clear)
+
+---
+
+**`highland/state/garage/motion`** ← RETAINED
+
+Motion sensor state. Present only if a compatible motion-sensing LiftMaster wall button is installed on the opener. Entity is registered unconditionally — will remain unavailable if hardware is absent.
+
+| | |
+|--|--|
+| **Publisher** | Garage Bridge flow |
+| **Consumers** | HA (via MQTT Discovery) |
+| **Retained** | Yes |
+
+```json
+{
+  "timestamp": "2026-03-11T09:15:00Z",
+  "source": "garage_bridge",
+  "state": "OFF"
+}
+```
+
+`state` values: `"ON"` | `"OFF"`
+
+---
+
+**`highland/state/garage/motor`** ← RETAINED
+
+Whether the opener's drive motor is actively running.
+
+| | |
+|--|--|
+| **Publisher** | Garage Bridge flow |
+| **Consumers** | HA (via MQTT Discovery) |
+| **Retained** | Yes |
+
+```json
+{
+  "timestamp": "2026-03-11T09:15:00Z",
+  "source": "garage_bridge",
+  "state": "OFF"
+}
+```
+
+`state` values: `"ON"` (running) | `"OFF"` (idle)
+
+---
+
+**`highland/state/garage/synced`** ← RETAINED
+
+Whether the Blaq has successfully completed the Security+ protocol handshake with the opener motor. `OFF` indicates a communication problem between the Blaq and the opener.
+
+| | |
+|--|--|
+| **Publisher** | Garage Bridge flow |
+| **Consumers** | HA (via MQTT Discovery) |
+| **Retained** | Yes |
+
+```json
+{
+  "timestamp": "2026-03-11T09:15:00Z",
+  "source": "garage_bridge",
+  "state": "ON"
+}
+```
+
+`state` values: `"ON"` (synced) | `"OFF"` (not synced)
+
+---
+
+**`highland/state/garage/openings`** ← RETAINED
+
+Cumulative lifetime open/close cycle count reported by the opener motor. Useful for maintenance tracking.
+
+| | |
+|--|--|
+| **Publisher** | Garage Bridge flow |
+| **Consumers** | HA (via MQTT Discovery) |
+| **Retained** | Yes |
+
+```json
+{
+  "timestamp": "2026-03-11T09:15:00Z",
+  "source": "garage_bridge",
+  "count": 1247
+}
+```
+
+---
+
+**`highland/state/garage/learn`** ← RETAINED
+
+State of the "learn mode" on the opener (used for pairing physical remotes).
+
+| | |
+|--|--|
+| **Publisher** | Garage Bridge flow |
+| **Consumers** | HA (via MQTT Discovery) |
+| **Retained** | Yes |
+
+```json
+{
+  "timestamp": "2026-03-11T09:15:00Z",
+  "source": "garage_bridge",
+  "state": "OFF"
+}
+```
+
+`state` values: `"ON"` | `"OFF"`
+
+---
+
+#### Garage Door Events (Not Retained)
+
+**`highland/event/garage/door_opened`**
+
+Fires when the door reaches the fully open state (`current_operation` transitions to `IDLE` with `state: OPEN`).
+
+```json
+{
+  "timestamp": "2026-03-11T09:15:00Z",
+  "source": "garage_bridge"
+}
+```
+
+---
+
+**`highland/event/garage/door_closed`**
+
+Fires when the door reaches the fully closed state.
+
+```json
+{
+  "timestamp": "2026-03-11T09:15:00Z",
+  "source": "garage_bridge"
+}
+```
+
+---
+
+**`highland/event/garage/obstruction_detected`**
+
+Fires on rising edge of the obstruction sensor.
+
+```json
+{
+  "timestamp": "2026-03-11T09:15:00Z",
+  "source": "garage_bridge"
+}
+```
+
+---
+
+**`highland/event/garage/obstruction_cleared`**
+
+Fires when the obstruction sensor returns to clear.
+
+```json
+{
+  "timestamp": "2026-03-11T09:15:00Z",
+  "source": "garage_bridge"
+}
+```
+
+---
+
+**`highland/event/garage/motion_detected`**
+
+Fires on rising edge of the motion sensor (if present).
+
+```json
+{
+  "timestamp": "2026-03-11T09:15:00Z",
+  "source": "garage_bridge"
+}
+```
+
+---
+
+#### Garage Door Commands
+
+**`highland/command/garage/door`**
+
+Published by HA MQTT cover entity via `command_template`. Node-RED translates to the appropriate Blaq REST endpoint.
+
+```json
+{
+  "timestamp": "2026-03-11T09:15:00Z",
+  "source": "ha_ui",
+  "action": "open"
+}
+```
+
+`action` values: `"open"` | `"close"` | `"stop"` | `"toggle"`
+
+---
+
+**`highland/command/garage/light`**
+
+```json
+{
+  "timestamp": "2026-03-11T09:15:00Z",
+  "source": "ha_ui",
+  "action": "turn_on"
+}
+```
+
+`action` values: `"turn_on"` | `"turn_off"` | `"toggle"`
+
+---
+
+**`highland/command/garage/remote_lock`**
+
+```json
+{
+  "timestamp": "2026-03-11T09:15:00Z",
+  "source": "ha_ui",
+  "action": "lock"
+}
+```
+
+`action` values: `"lock"` | `"unlock"`
+
+---
+
+**`highland/command/garage/learn`**
+
+```json
+{
+  "timestamp": "2026-03-11T09:15:00Z",
+  "source": "ha_ui",
+  "action": "turn_on"
+}
+```
+
+`action` values: `"turn_on"` | `"turn_off"` | `"toggle"`
+
+---
+
 ### Security
 
 **`highland/state/security/mode`** ← RETAINED
@@ -820,9 +1157,9 @@ User tapped a notification action — normalized from HA Companion App event.
 ```json
 {
   "timestamp": "2026-03-09T03:15:00Z",
-  "source": "pnc",
-  "host": "pnc",
-  "file": "pnc_backup_20260309_031500.tar.gz"
+  "source": "hub",
+  "host": "hub",
+  "file": "hub_backup_20260309_031500.tar.gz"
 }
 ```
 
@@ -949,16 +1286,19 @@ All command payloads carry minimal envelope:
 | `highland/state/#` | All retained operational state |
 | `highland/state/weather/#` | All weather state |
 | `highland/state/driveway/#` | Both bin states |
+| `highland/state/garage/#` | All garage state (door, light, lock, sensors) |
 | `highland/event/scheduler/#` | All scheduler events (periods + tasks) |
 | `highland/event/driveway/#` | All bin events (both bins, all transition types) |
 | `highland/event/driveway/trash_bin/#` | All trash bin events only |
 | `highland/event/driveway/recycling_bin/#` | All recycling bin events only |
 | `highland/event/mailbox/#` | All mailbox events |
+| `highland/event/garage/#` | All garage events |
 | `highland/event/+/leak/#` | Any leak in any area |
 | `highland/event/+/motion_detected` | Any motion in any area |
 | `highland/status/#` | All health and heartbeat |
 | `highland/status/+/health` | Health snapshots only |
 | `highland/command/backup/#` | All backup commands |
+| `highland/command/garage/#` | All garage commands |
 
 ---
 
@@ -973,7 +1313,7 @@ Topics not yet designed. Will be added as each domain is designed.
 | **HA Assist / Voice** | Marvin persona events; may not need bus presence |
 | **Area sensors** | Zigbee environmental, motion, contact — `highland/state/{area}/environment` |
 | **Lighting state** | TBD if lighting state needs bus representation beyond Z2M raw topics |
-| **Locks** | State beyond what Z2M/Z-Wave JS already exposes |
+| **Entry Door Locks** | Z-Wave/Zigbee door locks; state beyond what Z2M/ZWaveJS already exposes. Distinct from garage remote lockout (which is defined above). |
 
 ---
 
@@ -981,9 +1321,10 @@ Topics not yet designed. Will be added as each domain is designed.
 
 | Date | Change |
 |------|--------|
+| 2026-03-11 | Added Garage Door section (Konnected Blaq bridge). Added garage wildcard patterns. Clarified Locks pending domain as entry door locks, distinct from garage remote lockout. |
 | 2026-03-10 | Added Driveway Bins and Mailbox sections from LORA.md. Removed both from Domains Pending. Added driveway and mailbox wildcard patterns. |
 | 2026-03-09 | Initial creation. Established `highland/state/` namespace and MQTT Discovery pattern. Corrected: scheduler period events are no longer retained (state lives at `highland/state/scheduler/period`). Renamed `digest_daily` → `midnight`. Removed `weather/period_change`. Moved calendar suppression state from `status/` to `state/`. |
 
 ---
 
-*Last Updated: 2026-03-10*
+*Last Updated: 2026-03-11*
