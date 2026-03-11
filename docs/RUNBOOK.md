@@ -10,43 +10,35 @@ Step-by-step guide for building the Highland home automation infrastructure.
 
 | System | Hardware | Storage | Status |
 |--------|----------|---------|--------|
-| Protocol Nerve Center | Ryzen 5 3550H MFF | 512GB SSD | ✅ Ready |
-| HAOS | Dell OptiPlex 7050 SFF | 480GB SSD | ⏳ SSD on order |
-| Node-RED / Utility | Dell OptiPlex 7050 SFF | 480GB SSD | ⏳ SSD on order |
-| Reolink NVR | Reolink NVR | Internal | ✅ Ready (boxed) |
+| Communication Hub | Ryzen 5 3550H MFF | 512GB SSD | ✅ Ready |
+| HAOS | Dell OptiPlex 7050 SFF | 480GB SSD | ✅ Ready |
+| Workflow | Dell OptiPlex 7050 SFF | 480GB SSD | ✅ Ready |
+| Network Video Recorder | Reolink NVR | Internal | ✅ Ready (boxed) |
 
 **USB Devices:**
-- [x] SONOFF Zigbee 3.0 Dongle Plus (MG24) — for PNC
-- [x] SONOFF Z-Wave 800 Dongle Plus (PZG23) — for PNC
+- [x] SONOFF Zigbee 3.0 Dongle Plus (MG24) — for Communication Hub
+- [x] SONOFF Z-Wave 800 Dongle Plus (PZG23) — for Communication Hub
 
 ### Network Planning
 
-| System | Hostname | IP Address | Notes |
-|--------|----------|------------|-------|
-| Protocol Nerve Center | `pnc` | TBD | DHCP reservation or static |
-| HAOS | `ha` | TBD | DHCP reservation or static |
-| Node-RED / Utility | `nr` | TBD | DHCP reservation or static |
-| Reolink NVR | `nvr` | TBD | DHCP reservation or static |
-
-**DNS entries (optional):**
-```
-pnc.highland.ferris.network
-ha.highland.ferris.network
-nr.highland.ferris.network
-nvr.highland.ferris.network
-```
+| System | Hostname | Internal URL | External URL | Notes |
+|--------|----------|--------------|--------------|-------|
+| Communication Hub | `hub` | `http(s)://hub.local` | None | DHCP reservation or static |
+| HAOS | `home` | `http(s)://home.local` | `https://highland.ferris.network` (after decom) | DHCP reservation or static |
+| Workflow | `workflow` | `http(s)://workflow.local` | None | DHCP reservation or static |
+| Network Video Recorder | `nvr` | `http(s)://nvr.local` | None | DHCP reservation or static |
 
 **Ports to note:**
 | Service | Port | Host |
 |---------|------|------|
-| MQTT | 1883 | PNC |
-| MQTT (WebSocket) | 9001 | PNC (if needed) |
-| Zigbee2MQTT Frontend | 8080 | PNC |
-| Z-Wave JS UI | 8091 | PNC |
+| MQTT | 1883 | Communication Hub |
+| MQTT (WebSocket) | 9001 | Communication Hub (if needed) |
+| Zigbee2MQTT Frontend | 8080 | Communication Hub |
+| Z-Wave JS UI | 8091 | Communication Hub |
 | Home Assistant | 8123 | HAOS |
-| Node-RED | 1880 | NR |
-| Node-RED Admin API | 1880 | NR |
-| code-server | 8443 | NR (if installed) |
+| Node-RED | 1880 | Workflow |
+| Node-RED Admin API | 1880 | Workflow |
+| code-server | 8443 | Workflow (if installed) |
 
 ### Credentials to Prepare
 
@@ -82,7 +74,7 @@ Download these in advance to save time:
 
 ---
 
-## Phase 1: Protocol Nerve Center
+## Phase 1: Communication Hub
 
 The backbone. MQTT broker + protocol coordinators.
 
@@ -91,7 +83,7 @@ The backbone. MQTT broker + protocol coordinators.
 1. Flash Ubuntu Server 24.04 to USB
 2. Boot Ryzen MFF from USB
 3. Install with options:
-   - Hostname: `pnc`
+   - Hostname: `hub`
    - Username: `highland` (or your preference)
    - Enable OpenSSH server
    - No additional snaps
@@ -101,7 +93,7 @@ The backbone. MQTT broker + protocol coordinators.
 
 ```bash
 # Login and update
-sudo apt update &amp;&amp; sudo apt upgrade -y
+sudo apt update && sudo apt upgrade -y
 
 # Set static IP (if not using DHCP reservation)
 sudo nano /etc/netplan/00-installer-config.yaml
@@ -315,8 +307,8 @@ docker compose logs -f  # Watch logs, Ctrl+C to exit
 | Check | Command / Action |
 |-------|------------------|
 | MQTT broker responding | `mosquitto_sub -h localhost -u highland -P password -t '#' -v` |
-| Z2M frontend accessible | Browse to `http://pnc:8080` |
-| Z-Wave JS UI accessible | Browse to `http://pnc:8091` |
+| Z2M frontend accessible | Browse to `http://hub.local:8080` |
+| Z-Wave JS UI accessible | Browse to `http://hub.local:8091` |
 | Z-Wave JS WebSocket | Configure in UI, check logs |
 
 **Test MQTT pub/sub:**
@@ -341,7 +333,7 @@ Home Assistant OS on dedicated hardware.
 3. Install SSD in Dell OptiPlex 7050 SFF
 4. Boot from SSD
 5. Wait for initial setup (can take several minutes)
-6. Access at `http://homeassistant.local:8123`
+6. Access at `http://home.local:8123`
 
 ### 2.2 Initial Configuration
 
@@ -362,14 +354,15 @@ If not using DHCP reservation, set static IP:
 1. Settings → Home Assistant Cloud
 2. Sign in to Nabu Casa account
 3. Configure remote access
-4. Link custom domain if applicable
+4. **Do NOT expose external URL yet** — wait until live instance is decommissioned
+5. Link custom domain (`highland.ferris.network`) when ready
 
 ### 2.5 MQTT Integration
 
-1. Settings → Devices &amp; Services → Add Integration
+1. Settings → Devices & Services → Add Integration
 2. Search for "MQTT"
 3. Configure:
-   - Broker: `pnc` (or IP address)
+   - Broker: `hub.local` (or IP address)
    - Port: `1883`
    - Username: `highland`
    - Password: (your MQTT password)
@@ -377,11 +370,11 @@ If not using DHCP reservation, set static IP:
 
 ### 2.6 Z-Wave JS Integration
 
-1. Settings → Devices &amp; Services → Add Integration
+1. Settings → Devices & Services → Add Integration
 2. Search for "Z-Wave"
 3. Select "Z-Wave JS"
 4. Choose "Use Z-Wave JS Supervisor add-on" → **No**
-5. Enter WebSocket URL: `ws://pnc:3000`
+5. Enter WebSocket URL: `ws://hub.local:3000`
 6. Submit
 
 ### 2.7 Zigbee2MQTT Integration
@@ -399,7 +392,7 @@ Option B: Add MQTT integration and devices appear automatically
 panel_iframe:
   zigbee2mqtt:
     title: "Zigbee2MQTT"
-    url: "http://pnc:8080"
+    url: "http://hub.local:8080"
     icon: mdi:zigbee
     require_admin: true
 ```
@@ -409,7 +402,7 @@ panel_iframe:
 panel_iframe:
   zwavejs:
     title: "Z-Wave JS"
-    url: "http://pnc:8091"
+    url: "http://hub.local:8091"
     icon: mdi:z-wave
     require_admin: true
 ```
@@ -431,25 +424,25 @@ Generate for Node-RED integration:
 
 | Check | Action |
 |-------|--------|
-| MQTT connected | Settings → Devices &amp; Services → MQTT → shows connected |
-| Z-Wave JS connected | Settings → Devices &amp; Services → Z-Wave JS → shows connected |
+| MQTT connected | Settings → Devices & Services → MQTT → shows connected |
+| Z-Wave JS connected | Settings → Devices & Services → Z-Wave JS → shows connected |
 | Z2M devices visible | Check MQTT integration for discovered devices |
 | Sidebar panels work | Click Z2M and Z-Wave panels, verify UI loads |
-| Remote access works | Test via Nabu Casa from outside network |
+| Local access works | Test via `http://home.local:8123` |
 
 ---
 
-## Phase 3: Node-RED / Utility
+## Phase 3: Workflow
 
-Automation engine and utility services.
+Automation engine and utility services (Node-RED).
 
 ### 3.1 Ubuntu Server Installation
 
-Same process as PNC:
+Same process as Communication Hub:
 1. Flash Ubuntu Server 24.04 to USB
 2. Boot Dell OptiPlex 7050 SFF from USB
 3. Install with options:
-   - Hostname: `nr`
+   - Hostname: `workflow`
    - Username: `highland`
    - Enable OpenSSH server
 4. Complete installation, reboot
@@ -458,7 +451,7 @@ Same process as PNC:
 
 ```bash
 # Update
-sudo apt update &amp;&amp; sudo apt upgrade -y
+sudo apt update && sudo apt upgrade -y
 
 # Set static IP if needed (see Phase 1)
 
@@ -549,7 +542,7 @@ docker compose ps
 docker compose logs nodered
 ```
 
-Access Node-RED at `http://nr:1880`
+Access Node-RED at `http://workflow.local:1880`
 
 ### 3.7 Node-RED Palette Installation
 
@@ -587,7 +580,7 @@ In Node-RED:
 2. Double-click to configure
 3. Add new server:
    - Name: `Highland HA`
-   - Base URL: `http://ha:8123` (or IP)
+   - Base URL: `http://home.local:8123`
    - Access Token: (paste long-lived token from Phase 2)
 4. Deploy and verify connection
 
@@ -611,12 +604,12 @@ touch README.md
 **Initialize with empty/default JSON:**
 
 ```bash
-echo '{}' &gt; device_registry.json
-echo '{}' &gt; flow_registry.json
-echo '{}' &gt; notifications.json
-echo '{}' &gt; thresholds.json
-echo '{}' &gt; healthchecks.json
-echo '{}' &gt; secrets.json
+echo '{}' > device_registry.json
+echo '{}' > flow_registry.json
+echo '{}' > notifications.json
+echo '{}' > thresholds.json
+echo '{}' > healthchecks.json
+echo '{}' > secrets.json
 ```
 
 *Populate these as you build flows. See NODERED_PATTERNS.md for structure.*
@@ -630,7 +623,7 @@ Add Node-RED to HA sidebar:
 panel_iframe:
   nodered:
     title: "Node-RED"
-    url: "http://nr:1880"
+    url: "http://workflow.local:1880"
     icon: mdi:sitemap
     require_admin: true
 ```
@@ -639,7 +632,7 @@ panel_iframe:
 
 | Check | Action |
 |-------|--------|
-| Node-RED accessible | Browse to `http://nr:1880` |
+| Node-RED accessible | Browse to `http://workflow.local:1880` |
 | MQTT connection works | Add MQTT-in node, subscribe to `#`, see traffic |
 | HA connection works | Add HA node, verify green "connected" status |
 | Context persistence | Set a global variable, restart Node-RED, verify it persists |
@@ -657,9 +650,9 @@ node.warn(test);  // Should show the saved value
 
 ---
 
-## Phase 4: Reolink NVR
+## Phase 4: Network Video Recorder
 
-Camera infrastructure.
+Camera infrastructure (Reolink NVR).
 
 ### 4.1 Physical Setup
 
@@ -672,8 +665,9 @@ Camera infrastructure.
 
 1. Access NVR web interface or use Reolink app
 2. Set static IP (or DHCP reservation)
-3. Configure NTP for correct time
-4. Set timezone
+3. Set hostname to `nvr` for `nvr.local` resolution
+4. Configure NTP for correct time
+5. Set timezone
 
 ### 4.3 Camera Pairing
 
@@ -684,7 +678,7 @@ Camera infrastructure.
 
 ### 4.4 Home Assistant Integration
 
-1. Settings → Devices &amp; Services → Add Integration
+1. Settings → Devices & Services → Add Integration
 2. Search for "Reolink"
 3. Enter NVR IP address and credentials
 4. Cameras should appear as entities
@@ -697,7 +691,7 @@ Camera infrastructure.
 
 | Check | Action |
 |-------|--------|
-| NVR accessible | Browse to NVR web interface |
+| NVR accessible | Browse to `http://nvr.local` |
 | Cameras recording | Check NVR playback |
 | HA integration | Verify camera entities in HA |
 | Live view works | Test camera streams in HA dashboard |
@@ -708,14 +702,14 @@ Camera infrastructure.
 
 ### Backup Scripts
 
-**Protocol Nerve Center (`/usr/local/bin/highland-backup.sh`):**
+**Communication Hub (`/usr/local/bin/highland-backup.sh`):**
 ```bash
 #!/bin/bash
-# Highland Backup Script - Protocol Nerve Center
+# Highland Backup Script - Communication Hub
 
 BACKUP_DIR="/var/backups/highland"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="pnc_backup_${TIMESTAMP}.tar.gz"
+BACKUP_FILE="hub_backup_${TIMESTAMP}.tar.gz"
 
 # Create backup
 tar -czf "${BACKUP_DIR}/${BACKUP_FILE}" \
@@ -725,17 +719,17 @@ tar -czf "${BACKUP_DIR}/${BACKUP_FILE}" \
     /opt/highland/docker-compose.yml
 
 # Cleanup old backups (keep 7 days)
-find "${BACKUP_DIR}" -name "pnc_backup_*.tar.gz" -mtime +7 -delete
+find "${BACKUP_DIR}" -name "hub_backup_*.tar.gz" -mtime +7 -delete
 
 # Publish result to MQTT
 if [ $? -eq 0 ]; then
     mosquitto_pub -h localhost -u highland -P "PASSWORD" \
         -t "highland/event/backup/completed" \
-        -m "{\"host\":\"pnc\",\"file\":\"${BACKUP_FILE}\",\"timestamp\":\"$(date -Iseconds)\"}"
+        -m "{\"host\":\"hub\",\"file\":\"${BACKUP_FILE}\",\"timestamp\":\"$(date -Iseconds)\"}"
 else
     mosquitto_pub -h localhost -u highland -P "PASSWORD" \
         -t "highland/event/backup/failed" \
-        -m "{\"host\":\"pnc\",\"error\":\"tar failed\",\"timestamp\":\"$(date -Iseconds)\"}"
+        -m "{\"host\":\"hub\",\"error\":\"tar failed\",\"timestamp\":\"$(date -Iseconds)\"}"
 fi
 ```
 
@@ -747,16 +741,16 @@ sudo chmod +x /usr/local/bin/highland-backup.sh
 echo "15 3 * * * root /usr/local/bin/highland-backup.sh" | sudo tee /etc/cron.d/highland-backup
 ```
 
-**Node-RED Host:** Backup handled by Backup Utility Flow (see NODERED_PATTERNS.md).
+**Workflow Host:** Backup handled by Backup Utility Flow (see NODERED_PATTERNS.md).
 
 ### Watchdog Script
 
-**Create `/usr/local/bin/highland-watchdog.sh` on Node-RED host:**
+**Create `/usr/local/bin/highland-watchdog.sh` on Workflow host:**
 ```bash
 #!/bin/bash
 # Highland Watchdog - Monitors Node-RED heartbeat
 
-MQTT_HOST="pnc"
+MQTT_HOST="hub.local"
 MQTT_USER="highland"
 MQTT_PASS="PASSWORD"
 HEARTBEAT_TOPIC="highland/status/node_red/heartbeat"
@@ -764,10 +758,10 @@ HC_PING_URL="https://hc-ping.com/YOUR-UUID-HERE"
 TIMEOUT=90
 
 mosquitto_sub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" \
-    -t "$HEARTBEAT_TOPIC" -C 1 -W "$TIMEOUT" &gt; /dev/null 2&gt;&amp;1
+    -t "$HEARTBEAT_TOPIC" -C 1 -W "$TIMEOUT" > /dev/null 2>&1
 
 if [ $? -eq 0 ]; then
-    curl -fsS -m 10 --retry 3 "$HC_PING_URL" &gt; /dev/null
+    curl -fsS -m 10 --retry 3 "$HC_PING_URL" > /dev/null
 else
     logger "highland-watchdog: No heartbeat from Node-RED"
 fi
@@ -783,13 +777,13 @@ echo "* * * * * root /usr/local/bin/highland-watchdog.sh" | sudo tee /etc/cron.d
 1. Create account at healthchecks.io
 2. Create checks for:
    - `highland-node-red` (1 min period, 2 min grace)
-   - `highland-pnc-backup` (24h period, 1h grace)
-   - `highland-nr-backup` (24h period, 1h grace)
+   - `highland-hub-backup` (24h period, 1h grace)
+   - `highland-workflow-backup` (24h period, 1h grace)
 3. Copy ping URLs to `secrets.json`
 
 ### Log Rotation
 
-**Create `/etc/logrotate.d/highland` on Node-RED host:**
+**Create `/etc/logrotate.d/highland` on Workflow host:**
 ```
 /var/log/highland/*.jsonl {
     daily
@@ -814,7 +808,7 @@ Create these flows in Node-RED to establish baseline functionality:
 
 1. Pick one non-critical Zigbee device
 2. Remove from old Z2M instance
-3. Pair to new Z2M on PNC
+3. Pair to new Z2M on Communication Hub
 4. Verify appears in HA
 5. Create simple test flow in Node-RED
 6. Verify end-to-end control
@@ -827,26 +821,25 @@ Create these flows in Node-RED to establish baseline functionality:
 
 | Check | Status |
 |-------|--------|
-| PNC: All containers running | ☐ |
-| PNC: MQTT accepting connections | ☐ |
-| PNC: Z2M frontend accessible | ☐ |
-| PNC: Z-Wave JS UI accessible | ☐ |
+| Hub: All containers running | ☐ |
+| Hub: MQTT accepting connections | ☐ |
+| Hub: Z2M frontend accessible | ☐ |
+| Hub: Z-Wave JS UI accessible | ☐ |
 | HAOS: Running and accessible | ☐ |
 | HAOS: MQTT integration connected | ☐ |
 | HAOS: Z-Wave JS integration connected | ☐ |
-| HAOS: Nabu Casa remote access working | ☐ |
-| NR: Node-RED accessible | ☐ |
-| NR: HA integration connected | ☐ |
-| NR: Context persistence working | ☐ |
+| Workflow: Node-RED accessible | ☐ |
+| Workflow: HA integration connected | ☐ |
+| Workflow: Context persistence working | ☐ |
 | NVR: Cameras recording | ☐ |
 | NVR: HA integration working | ☐ |
 
-### Backup &amp; Monitoring
+### Backup & Monitoring
 
 | Check | Status |
 |-------|--------|
-| PNC backup script installed | ☐ |
-| PNC backup cron configured | ☐ |
+| Hub backup script installed | ☐ |
+| Hub backup cron configured | ☐ |
 | Watchdog script installed | ☐ |
 | Watchdog cron configured | ☐ |
 | Healthchecks.io receiving pings | ☐ |
@@ -863,4 +856,4 @@ Create these flows in Node-RED to establish baseline functionality:
 
 ---
 
-*Last Updated: 2026-03-03*
+*Last Updated: 2026-03-11*
