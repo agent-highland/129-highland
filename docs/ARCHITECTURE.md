@@ -319,6 +319,32 @@ Backup Utility collects results, notifies on failure
 - **Weather automation expansion** — Map compositing, image manipulation (needs horsepower)
 - **Room-based automations** — Light switches, presence detection, etc.
 
+### Stretch Goal: Dedicated LLM Inference Box
+
+**Status:** Deferred — post-baseline infrastructure only. Do not begin until PNC, HAOS, NR, and Edge AI box are all stable.
+
+**Candidate hardware:** Existing ATX mid-tower (previously development desktop / Plex server, currently idle)
+
+| Component | Spec |
+|-----------|------|
+| CPU | AMD Ryzen 5 3600 6-Core |
+| RAM | 64GB DDR4-3600 |
+| Storage | 1TB Crucial MX500 SSD + 4TB WD Black HDD |
+| GPU | Sapphire RX 580 8GB → **replace with RTX 3060 12GB** |
+| PSU | EVGA 600W 80+ Bronze |
+| Case | ATX Mid-Tower |
+
+**Required change:** Swap RX 580 for RTX 3060 12GB (~$200-250 used). RX 580 ROCm support on Ollama is inconsistent; CUDA on RTX 3060 is clean and well-supported. 12GB VRAM runs 13B models comfortably with headroom.
+
+**Role:** Dedicated Ollama LLM inference, decoupled from Edge AI box (which retains Coral TPU for vision inference in its single PCIe slot). With this box online, Node-RED can own conversation orchestration directly — talking to Ollama outside of HA's Assist pipeline — which unblocks the persistent memory architecture.
+
+**Why this unblocks memory:** HA's conversation agent pipeline is fully sandboxed — pipeline events are internal-only, no writable surface is reachable from within the conversation agent, and external context injection is equally constrained (verified via ~2 hours live experimentation on HA 2026.3.1). The only clean solution is NR owning orchestration directly, which requires a capable Ollama instance. See ASSIST_PIPELINE.md for full details.
+
+**Services on this box:**
+- Ollama (LLM inference — primary conversation agent for Marvin)
+- Conversation history / memory store (markdown files, human-readable)
+- Future LLM workloads as needed
+
 ---
 
 ## Related Documents
@@ -341,4 +367,4 @@ Backup Utility collects results, notifies on failure
 
 ---
 
-*Last Updated: 2026-03-11*
+*Last Updated: 2026-03-12*
