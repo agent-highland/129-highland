@@ -239,7 +239,7 @@ mqtt:
   base_topic: zigbee2mqtt
   server: mqtt://mosquitto:1883
   user: svc_zigbee2mqtt
-  password: YOUR_SVC_ZIGBEE2MQTT_PASSWORD
+  password: "YOUR_SVC_ZIGBEE2MQTT_PASSWORD"
 serial:
   port: /dev/serial/by-id/usb-ITead_Sonoff_Zigbee_3.0_USB_Dongle_Plus_xxx-if00-port0
 frontend:
@@ -264,6 +264,8 @@ Output will be ready to paste directly into `configuration.yaml`, e.g.:
 ```
 
 Replace `GENERATE_NEW_KEY` in the yaml with this array. **Save it somewhere safe** — if you ever lose the network key, all paired Zigbee devices will need to be re-paired.
+
+> **YAML gotchas:** Always wrap passwords in double quotes in YAML files. Several characters are special in YAML and will cause silent parse errors if unquoted at the start of a value: `!`, `:`, `{`, `}`, `[`, `]`, `#`, `|`, `>`, `*`, `&`. Safest rule: just always quote passwords, no exceptions. Also, YAML uses spaces only — never tabs.
 
 ### 1.8 Z-Wave JS UI Configuration
 
