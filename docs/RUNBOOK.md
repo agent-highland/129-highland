@@ -51,6 +51,7 @@ Generate/document these before starting:
 | MQTT `svc_nodered` password | Node-RED → broker auth | secrets.json |
 | MQTT `svc_homeassistant` password | Home Assistant → broker auth | secrets.json |
 | MQTT `svc_scripts` password | Backup/watchdog scripts → broker auth | secrets.json |
+| PostgreSQL `highland` password | HA Recorder + video pipeline → Postgres | secrets.json |
 | HA long-lived access token | Node-RED → HA integration | Node-RED credentials |
 | Healthchecks.io ping URLs | External monitoring | secrets.json |
 | SMTP credentials | Daily digest email | secrets.json |
@@ -388,6 +389,8 @@ Home Assistant OS on dedicated hardware.
 3. Name the installation: `Highland` (or preference)
 4. Skip integrations for now (we'll add manually)
 
+> **Recorder note:** Leave HA on its default SQLite recorder for now. PostgreSQL will be deployed on the Workflow host in Phase 3, and the recorder will be reconfigured to point at it before meaningful history accumulates. Switching to Postgres early avoids orphaned SQLite history later.
+
 ### 2.3 Network Configuration
 
 If not using DHCP reservation, set static IP:
@@ -480,7 +483,7 @@ Generate for Node-RED integration:
 
 ## Phase 3: Workflow
 
-Automation engine and utility services (Node-RED).
+Automation engine and utility services (Node-RED + PostgreSQL).
 
 ### 3.1 Ubuntu Server Installation
 
@@ -533,6 +536,9 @@ docker --version
 sudo mkdir -p /opt/highland/nodered/data
 sudo mkdir -p /home/nodered/config
 
+# PostgreSQL data directory
+sudo mkdir -p /opt/highland/postgres/data
+
 # Backup directory
 sudo mkdir -p /var/backups/highland
 
@@ -553,6 +559,20 @@ sudo chown -R $USER:$USER /var/log/highland
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    volumes:
+      - /opt/highland/postgres/data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=highland
+      - POSTGRES_PASSWORD=YOUR_POSTGRES_PASSWORD
+      - POSTGRES_DB=homeassistant
+      - TZ=America/New_York
+
   nodered:
     image: nodered/node-red:latest
     container_name: nodered
@@ -582,7 +602,7 @@ services:
   #     - PASSWORD=your-code-server-password
 ```
 
-### 3.6 Launch Node-RED
+### 3.6 Launch Services
 
 ```bash
 cd /opt/highland
@@ -698,6 +718,42 @@ return msg;
 const test = global.get('test_persist');
 node.warn(test);  // Should show the saved value
 ```
+
+### 3.13 PostgreSQL Verification
+
+Confirm the Postgres container is healthy and accepting connections:
+
+```bash
+# Check container status
+docker compose ps postgres
+
+# Verify you can connect
+docker exec -it postgres psql -U highland -d homeassistant -c '\l'
+```
+
+You should see the `homeassistant` database listed.
+
+### 3.14 HA Recorder Reconfiguration
+
+Now that Postgres is running, point HA's recorder at it. This must be done **before** significant history accumulates in SQLite — switching later orphans existing history with no migration path.
+
+**On the HAOS host**, edit `configuration.yaml` (via File Editor add-on or SSH):
+
+```yaml
+recorder:
+  db_url: postgresql://highland:YOUR_POSTGRES_PASSWORD@workflow.local/homeassistant
+  purge_keep_days: 30
+```
+
+> **Note:** `purge_keep_days` sets how long HA keeps state history. 30 days is a reasonable baseline — adjust to taste. The video pipeline will write its own events to the same Postgres instance under a separate schema, so this only controls HA's recorder retention.
+
+Restart Home Assistant after saving:
+- Settings → System → Restart
+
+**Verify the switch worked:**
+1. Check HA logs (Settings → System → Logs) for recorder connection confirmation
+2. Browse to Developer Tools → Template and query a recent entity state — if history is populating, Postgres is working
+3. Optionally confirm on the Workflow host: `docker exec -it postgres psql -U highland -d homeassistant -c 'SELECT COUNT(*) FROM states;'` — row count should grow over time
 
 ---
 
@@ -882,6 +938,8 @@ Create these flows in Node-RED to establish baseline functionality:
 | Workflow: Node-RED accessible | ☐ |
 | Workflow: HA integration connected | ☐ |
 | Workflow: Context persistence working | ☐ |
+| Workflow: PostgreSQL running | ☐ |
+| Workflow: HA recorder on PostgreSQL | ☐ |
 | NVR: Cameras recording | ☐ |
 | NVR: HA integration working | ☐ |
 
@@ -899,7 +957,7 @@ Create these flows in Node-RED to establish baseline functionality:
 ### First Automation
 
 | Check | Status |
-|-------|--------|
+|-------|--------|  
 | Test device paired to new Z2M | ☐ |
 | Device visible in HA | ☐ |
 | Node-RED can control device via MQTT | ☐ |
