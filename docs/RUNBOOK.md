@@ -10,7 +10,7 @@ Step-by-step guide for building the Highland home automation infrastructure.
 
 | System | Hardware | Storage | Status |
 |--------|----------|---------|--------|
-| Communication Hub | Ryzen 5 3550H MFF | 512GB SSD | ✅ Ready |
+| Communication Hub | Dell OptiPlex 7050 MFF | 512GB SSD | ✅ Ready |
 | HAOS | Dell OptiPlex 7050 SFF | 480GB SSD | ✅ Ready |
 | Workflow | Dell OptiPlex 7050 SFF | 480GB SSD | ✅ Ready |
 | Network Video Recorder | Reolink NVR | Internal | ✅ Ready (boxed) |
@@ -86,7 +86,7 @@ The backbone. MQTT broker + protocol coordinators.
 ### 1.1 Ubuntu Server Installation
 
 1. Flash Ubuntu Server 24.04 to USB
-2. Boot Ryzen MFF from USB
+2. Boot Dell OptiPlex 7050 MFF from USB
 3. Install with options:
    - Hostname: `hub`
    - Username: `highland` (or your preference)
@@ -472,7 +472,7 @@ Generate for Node-RED integration:
 
 ## Phase 3: Workflow
 
-Automation engine and utility services (Node-RED + PostgreSQL).
+Automation engine and utility services (Node-RED).
 
 ### 3.1 Ubuntu Server Installation
 
@@ -591,7 +591,7 @@ services:
   #     - PASSWORD=your-code-server-password
 ```
 
-### 3.6 Launch Services
+### 3.6 Launch Node-RED
 
 ```bash
 cd /opt/highland
@@ -923,8 +923,6 @@ Create these flows in Node-RED to establish baseline functionality:
 | Workflow: Node-RED accessible | ☐ |
 | Workflow: HA integration connected | ☐ |
 | Workflow: Context persistence working | ☐ |
-| Workflow: PostgreSQL running | ☐ |
-| Workflow: HA recorder on PostgreSQL | ☐ |
 | NVR: Cameras recording | ☐ |
 | NVR: HA integration working | ☐ |
 

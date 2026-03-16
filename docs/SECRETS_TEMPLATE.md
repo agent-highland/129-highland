@@ -32,7 +32,7 @@ Unified reference for all credentials, keys, tokens, and service accounts across
 
 | Host | Hostname | IP Address | Hardware |
 |---|---|---|---|
-| Communication Hub | `hub.local` | `FILL_IN` | Ryzen 5 3550H MFF |
+| Communication Hub | `hub.local` | `FILL_IN` | Dell OptiPlex 7050 MFF |
 | HAOS | `home.local` | `FILL_IN` | Dell OptiPlex 7050 SFF |
 | Workflow | `workflow.local` | `FILL_IN` | Dell OptiPlex 7050 SFF |
 | NVR | `nvr.local` | `FILL_IN` | Reolink NVR |
