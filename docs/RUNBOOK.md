@@ -572,6 +572,9 @@ services:
       - /opt/highland/nodered/data:/data
       - /home/nodered/config:/config:ro
       - /var/log/highland:/var/log/highland
+    extra_hosts:
+      - "home.local:HAOS_IP_ADDRESS"    # mDNS doesn't work inside Docker — map explicitly
+      - "hub.local:HUB_IP_ADDRESS"      # Add other .local hosts Node-RED needs to reach
     environment:
       - TZ=America/New_York
     # user: "1000:1000"  # Match host user if needed
@@ -645,6 +648,8 @@ In Node-RED:
    - Base URL: `http://home.local:8123`
    - Access Token: (paste long-lived token from Phase 2)
 4. Deploy and verify connection
+
+> **mDNS inside Docker:** Docker containers cannot resolve `.local` hostnames via mDNS — Avahi runs on the host, not inside containers. If the server node stays stuck on "connecting", this is the cause. Fix: add `extra_hosts` to the Node-RED service in `docker-compose.yml` (see section 3.5) mapping `home.local` and `hub.local` to their actual IP addresses, then `docker compose up -d --force-recreate nodered`. Alternatively, use IP addresses directly in the Base URL during initial setup.
 
 ### 3.10 Config Directory Setup
 
