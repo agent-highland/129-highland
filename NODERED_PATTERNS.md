@@ -152,13 +152,11 @@ Each service check that Node-RED is responsible for pings its corresponding Heal
 
 ### Naming Convention
 
-Flows are named by their area or utility function:
-- `Garage`
-- `Living Room`
-- `Scheduler`
-- `Notifications`
+Tab names use a prefix to indicate type:
+- Area tabs: `Area: Garage`, `Area: Living Room`
+- Utility tabs: `Utility: Connections`, `Utility: Notifications`
 
-*No prefixes or suffixes needed — the flow list in Node-RED is the organizing structure.*
+Groups within a tab have descriptive names. Link nodes are named for what they carry.
 
 ---
 
@@ -181,22 +179,12 @@ Flows are named by their area or utility function:
 │  └─────────┘    └─────────┘    └─────────┘    └─────────────┘  │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────┐
-│ Group: Control Lights                                           │
-│                                                                 │
-│  ┌─────────────┐    ┌─────────┐    ┌─────────┐                 │
-│  │ Link In     │───►│ Set     │───►│ MQTT    │                 │
-│  │ from motion │    │ payload │    │ Out     │                 │
-│  └─────────────┘    └─────────┘    └─────────┘                 │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
 ```
 
 **Benefits:**
 - Each group is a logical unit with a clear purpose
 - Link nodes connect groups without spaghetti wires
-- Flow reads top-to-bottom or left-to-right in sections
+- Flow reads left-to-right in sections
 - Minimizes horizontal scrolling
 
 ---
@@ -206,7 +194,8 @@ Flows are named by their area or utility function:
 ### Use Sparingly, For Truly Reusable Components
 
 **Good candidates for subflows:**
-- Latches — reusable startup gates (see below)
+- Latches — reusable startup gates
+- Gates — connection-aware routing (see Connection Gate)
 - Common transformations used identically across many flows
 
 **Not good candidates:**
@@ -214,71 +203,24 @@ Flows are named by their area or utility function:
 - One-off utilities (just use a function node)
 - Anything that hides important business logic
 
-### Latch Pattern
-
-Latches are subflows that gate message flow until some condition is met. The naming convention is `{Condition} Latch` — e.g. `Initializer Latch`, leaving room for future variants like `Network Latch` or `Availability Latch`.
-
-All latches share the same interface:
-- **1 input** — any message from any source (inject, MQTT, HTTP, etc.)
-- **Output 1 (OK)** — messages pass through once condition is met; buffered messages drain in order
-- **Output 2 (TIMEOUT)** — single signal message when condition is never met within retry window
-
 ### Initializer Latch
 
-Gates flow execution until `Utility: Initializers` has populated the `initializers` context store. Drop this into any flow's startup sequencing group.
+Gates flow execution until `Utility: Initializers` has populated the `initializers` context store. Place at the MQTT ingress of any flow that uses utilities from the `initializers` store or reads `global.config`.
 
-**Environment variables (configurable per instance):**
-- `RETRY_INTERVAL_MS` — delay between retries in milliseconds (default: 250)
-- `MAX_RETRIES` — maximum retry attempts before timeout (default: 20)
+**Environment variables:**
+- `RETRY_INTERVAL_MS` — delay between retries in ms (default: 250)
+- `MAX_RETRIES` — maximum retry attempts (default: 20)
 - `CONTEXT_PREFIX` (UI label: **Scope**) — prefix for flow context keys; required when multiple instances on the same flow tab
 
-Total timeout at defaults: 250ms × 20 = 5 seconds.
+Total timeout at defaults: 5 seconds.
 
-**Internal behavior:**
-- Every incoming message is buffered immediately
-- On first message, starts polling `global.get('initializers.ready', 'initializers')`
-- If flag is `true` → sets `flow.{prefix}initialized = true`, clears degraded, drains buffer via Output 1
-- If max retries exceeded → sets `flow.{prefix}degraded = true`, discards buffer, shows red ring on subflow instance, emits signal via Output 2
-- If already initialized → passes message through Output 1 directly (no buffering)
-- If already degraded → drops message silently
+**Behavior:**
+- Messages are buffered immediately on arrival
+- Polls `global.get('initializers.ready', 'initializers')` until true, then drains buffer via Output 1
+- On timeout: sets degraded state, discards buffer, shows red ring on subflow instance, emits via Output 2
+- Output 2 is optional — the red ring is sufficient visibility for operator-introduced failures
 
-**Output 2 is optional** — the subflow instance shows a red ring on timeout regardless of whether Output 2 is wired. Wire Output 2 only when programmatic handling of the failure is needed.
-
-**Degraded state cause:** Always a bug in `Utility: Initializers` — introduced by a deploy. Recovery: fix Initializers → redeploy Initializers → redeploy affected flows.
-
----
-
-## Flow Registration
-
-### Purpose
-
-Each area flow self-registers its identity and owned devices. This creates a queryable global registry that enables:
-- Targeting messages by area
-- Looking up devices by capability
-- Knowing which area owns which device
-
-### Storage
-
-| Storage | Persistence | Purpose |
-|---------|-------------|---------|
-| `flow.identity` | Disk | This flow's identity and devices |
-| `global.flowRegistry` | Disk | All flows' registrations |
-| `global.config.deviceRegistry` | Disk | Device details (single source of truth for capabilities) |
-
-### Registration Boilerplate
-
-```javascript
-const flowIdentity = {
-  area: 'foyer',
-  devices: ['foyer_entry_door', 'foyer_environment']
-};
-flow.set('identity', flowIdentity);
-const registry = global.get('flowRegistry') || {};
-registry[flowIdentity.area] = { devices: flowIdentity.devices };
-global.set('flowRegistry', registry);
-node.status({ fill: 'green', shape: 'dot', text: `Registered: ${flowIdentity.devices.length} devices` });
-return msg;
-```
+**Degraded state cause:** Always a bug in `Utility: Initializers` introduced by a deploy. Recovery: fix Initializers → redeploy Initializers → redeploy affected flows.
 
 ---
 
@@ -286,38 +228,30 @@ return msg;
 
 ### The Problem
 
-On Node-RED startup or deploy, three things can conflict:
+On Node-RED startup or deploy, MQTT subscriptions deliver retained messages immediately while Initializers may not have finished populating the `initializers` store. Node-RED makes no startup ordering guarantees.
 
-1. MQTT subscriptions deliver retained messages immediately
-2. Config Loader and flow context restoration may still be in progress
-3. `Utility: Initializers` may not have finished populating the `initializers` store
+### Solution
 
-Node-RED makes no startup ordering guarantees between inject nodes across flows.
+Place an `Initializer Latch` at the MQTT ingress of every flow that:
+- Subscribes to retained state topics, or
+- Uses utilities from the `initializers` store (`utils.formatStatus`, etc.), or
+- Reads `global.config`
 
-### Solution: Initializer Latch
-
-The `Initializer Latch` subflow handles startup sequencing. Every flow that subscribes to retained state topics or uses utilities from the `initializers` store should gate its MQTT ingress through an Initializer Latch instance.
+The latch buffers messages until initializers are ready, then drains them in order.
 
 ### Bootstrapping Limitation
 
 You cannot use infrastructure to report infrastructure failures. If MQTT is unavailable:
-- **Node-RED debug sidebar** — node status visible in editor regardless of MQTT
-- **Node-RED console log** — `node.error()` writes to internal log, visible via `docker compose logs nodered`
-- **Healthchecks.io** — Health Monitor pings via direct HTTP independently of MQTT
-
-### Degraded State Recovery
-
-Root cause is always in `Utility: Initializers`. Steps:
-1. Fix the issue in `Utility: Initializers`
-2. Deploy `Utility: Initializers`
-3. Redeploy affected flows (required to reset persisted flow context)
+- `node.error()` / `node.warn()` write to Node-RED's internal log — visible via `docker compose logs nodered`
+- Node status (red ring) is visible in the editor regardless of MQTT state
+- Healthchecks.io receives pings via direct HTTP independently of MQTT
 
 ---
 
 ## Error Handling
 
 1. **Targeted handlers** — Catch errors in specific groups where custom handling is needed
-2. **Flow-wide catch-all** — Single Error node per flow catches anything unhandled, dispatches to `highland/event/log`
+2. **Flow-wide catch-all** — Single Error node per flow, dispatches to `highland/event/log`
 
 ---
 
@@ -329,20 +263,20 @@ Logging answers: *"How important is this for troubleshooting/audit?"* Separate f
 
 ### Log Storage
 
-**Format:** JSONL (JSON Lines) — one JSON object per line
+**Format:** JSONL — one JSON object per line
 **Location:** `/var/log/highland/highland-YYYY-MM-DD.jsonl`
-**Rotation:** Daily, retain 30 days via cron
+**Rotation:** Daily via cron, retain 30 days
 
 ### Log Entry Structure
 
-| Field | Purpose | Examples |
-|-------|---------|----------|
-| `timestamp` | When it happened | `2025-02-24T10:00:00Z` |
-| `system` | Which system | `node_red`, `ha`, `z2m`, `zwave_js` |
-| `source` | Component within system | `garage`, `connections` |
-| `level` | Severity | `VERBOSE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `CRITICAL` |
-| `message` | Human-readable description | |
-| `context` | Structured additional data | |
+| Field | Purpose |
+|-------|---------|
+| `timestamp` | ISO 8601 |
+| `system` | `node_red`, `ha`, `z2m`, `zwave_js` |
+| `source` | Component within system |
+| `level` | `VERBOSE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `CRITICAL` |
+| `message` | Human-readable description |
+| `context` | Structured additional data |
 
 ### Log Levels
 
@@ -355,11 +289,11 @@ Logging answers: *"How important is this for troubleshooting/audit?"* Separate f
 | `ERROR` | Something failed but flow continues |
 | `CRITICAL` | Catastrophic failure; intervention needed |
 
-**CRITICAL only** auto-notifies. Escalation beyond that is the flow's responsibility.
+**CRITICAL only** auto-notifies. Escalation is the flow's responsibility.
 
 ### MQTT/Console Fallback Pattern
 
-Every flow with a logging path uses this pattern:
+Every flow with a logging path uses this pattern to handle MQTT unavailability:
 
 ```
 Log Event link in → MQTT Available? switch (global.connections.mqtt == 'up')
@@ -368,15 +302,6 @@ Format Log Message → MQTT out    Log to Console (node.error/warn)
 ```
 
 Log messages are set on `msg.log_level`, `msg.log_message`, and `msg.log_context` by the emitting node before reaching this group.
-
----
-
-## Device Registry
-
-**File:** `/home/nodered/config/device_registry.json`
-**Access:** `global.get('config').deviceRegistry`
-
-Centralized knowledge about devices — protocol, topic structure, capabilities, battery metadata. Abstracts Z2M vs Z-Wave JS differences so flows don't need protocol details.
 
 ---
 
@@ -614,13 +539,13 @@ Centralized delivery of notifications to people via configured channels. All not
 
 ### Groups
 
-**Receive Notification** — MQTT in → Initializer Latch → Validate Payload → Fan Out → Link Out
+**Receive Notification** — MQTT in (`highland/event/notify`) → Initializer Latch → Validate Payload → Build Targets → `link call` (Deliver, dynamic) → Log Event link out
 
-**HA Companion Delivery** — Link In → Connection Gate → Build Service Call → HA service call node → Log link out
+**HA Companion Delivery** — Link In (`Home Assistant Companion`) → Connection Gate → Build Service Call → HA service call node → `link out` (return mode)
 
-**Clear Notification** — MQTT in → Initializer Latch → Build Clear Call → HA service call node → Log link out
+**Clear Notification** — MQTT in (`highland/command/notify/clear`) → Initializer Latch → Build Clear Call → `link call` (Deliver, dynamic) → Log Event link out
 
-**State Change Logging** — Log link in → MQTT Available? → Format Log Message → MQTT out / Log to Console
+**State Change Logging** — Log Event link in → MQTT Available? switch → Format Log Message → MQTT out / Log to Console
 
 **Test Cases** — Persistent sanity tests; intentionally not removed.
 
@@ -635,48 +560,110 @@ Centralized delivery of notifications to people via configured channels. All not
 
 Required: `channels`, `recipients`, `severity`, `title`, `message`. Both arrays must be non-empty. Invalid → WARN log, drop.
 
-### Fan Out
+### Build Targets (Fan Out)
 
-Iterates `channels × recipients`. Looks up `global.config.notifications.people.{person}.channels.{channel}`. Emits one message per valid combination with `msg.payload._delivery` set:
+Iterates `channels × recipients`. Looks up `global.config.notifications.people.{person}.channels.{channel}`. For each valid combination, sends one message with `msg.payload._delivery` and `msg.target` set:
 
 ```javascript
-_delivery: { channel: 'ha_companion', recipient: 'joseph', address: 'notify.mobile_app_joseph_galaxy_s23' }
+node.send({
+    payload: {
+        ...msg.payload,
+        _delivery: { channel, recipient, address }
+    },
+    target: resolveLinkTarget(channel)
+});
 ```
 
-Missing recipient or address → WARN log, skip, continue.
+`resolveLinkTarget()` maps channel names to their `Link In` node names:
+
+```javascript
+function resolveLinkTarget(channel) {
+    switch (channel) {
+        case 'ha_companion': return 'Home Assistant Companion';
+        default: throw new Error(`Unable to resolve channel: ${channel}`);
+    }
+}
+```
+
+Adding a new channel: add a case here and a new delivery group with a matching `Link In` name. Missing recipient or address → WARN log, skip, continue.
+
+### `link call` Node (Deliver)
+
+Reads `msg.target` dynamically and routes to the matching `Link In` node name. Set to **dynamic** link type, 30 second timeout. Output wires to Log Event link out — logging happens once on the return path after delivery completes. Timeouts handled by a catch node scoped to the `link call` — logs WARN and moves on.
 
 ### Connection Gate (HA Companion Delivery)
 
-`CONNECTION_TYPE = home_assistant`, `CONTEXT_PREFIX = ha-`, `RETENTION_MS = 0`. Output 2 unwired initially — wire to Pushover group when added.
+`CONNECTION_TYPE = home_assistant`, `CONTEXT_PREFIX = ha-`, `RETENTION_MS = 0`. Output 2 unwired — if HA is down the message drops. Resiliency is the caller's responsibility via channel selection.
 
 ### Build Service Call
 
+Handles both delivery and clear paths, branched on `_delivery.type`:
+
 ```javascript
-msg.payload = {
-    action: _delivery.address,
-    data: { title, message, data }
-};
+// Clear path
+if (_delivery.type === 'clear') {
+    msg.payload = {
+        action: _delivery.address,
+        data: { message: 'clear_notification', data: { tag: msg.payload.correlation_id } }
+    };
+    msg.log_message = `Notification cleared for ${_delivery.recipient} via ${_delivery.channel}`;
+    return msg;
+}
+
+// Delivery path
+msg.payload = { action: _delivery.address, data: { title, message, data } };
 msg.log_message = `Notification delivered to ${_delivery.recipient} via ${_delivery.channel}`;
+return msg;
 ```
 
-**`api-call-service` node:** Action field blank; Data field = JSONata `payload.data`.
+**Severity → HA Companion mapping:**
+
+| Severity | Channel | Importance | Persistent |
+|----------|---------|------------|------------|
+| `low` | `highland_low` | `low` | No |
+| `medium` | `highland_default` | `default` | No |
+| `high` | `highland_high` | `high` | No (unless `sticky: true`) |
+| `critical` | `highland_critical` | `high` | Yes |
+
+**`api-call-service` node:** Action field blank (reads `msg.payload.action` implicitly); Data field = JSONata `payload.data`.
 
 ### Build Clear Call
 
+Mirrors Build Targets — iterates recipients, resolves `ha_companion` address, sets `_delivery.type: 'clear'`, and sends via `link call`:
+
 ```javascript
-// Per recipient:
-node.send({ payload: {
-    action: address,
-    data: { message: 'clear_notification', data: { tag: correlation_id } }
-}});
+node.send({
+    payload: {
+        _delivery: { channel: 'ha_companion', recipient, address, type: 'clear' },
+        correlation_id
+    },
+    target: 'Home Assistant Companion'
+});
 ```
 
 `correlation_id` must match the original delivery. `tag` ≠ `correlation_id`.
 
+**Clear payload (MQTT):**
+```json
+{
+  "correlation_id": "lockdown_20250224_2200",
+  "recipients": ["joseph"]
+}
+```
+
+### HA Companion Delivery — Return Path
+
+The last node in the group is a `link out` set to **return** mode. This returns the message to whichever `link call` dispatched it (Receive Notification or Clear Notification), completing the call/return cycle and triggering downstream logging.
+
+### State Change Logging
+
+Same MQTT/console fallback pattern as `Utility: Connections`. `Build Service Call` sets `msg.log_message` on both delivery and clear paths before returning to the caller. `Format Log Message` reads `msg.log_level` (default `INFO`), `msg.log_message`, and `msg.log_context`.
+
 ### Notes
 
 - `Utility: Notifications` is the only flow that calls HA notify services
-- Channel adapters degrade gracefully — each uses what it supports
+- All HA delivery and clear traffic flows through the same HA Companion group — the group is channel-specific, not operation-specific
+- Adding a new channel: add a case to `resolveLinkTarget()`, build a new delivery group with a matching `Link In` name, wire the return `link out`
 - Action responses deferred until actionable notifications are implemented
 - Test Cases group preserved for sanity testing
 
@@ -711,6 +698,20 @@ Treat this as a line-of-business application. Each service self-reports its own 
 
 ---
 
+## Flow Registration
+
+Each area flow self-registers at startup:
+
+```javascript
+const flowIdentity = { area: 'foyer', devices: ['foyer_entry_door'] };
+flow.set('identity', flowIdentity);
+const registry = global.get('flowRegistry') || {};
+registry[flowIdentity.area] = { devices: flowIdentity.devices };
+global.set('flowRegistry', registry);
+```
+
+---
+
 ## ACK Tracker
 
 Centralized ACK tracking for flows that need confirmation of actions.
@@ -738,7 +739,7 @@ Centralized ACK tracking for flows that need confirmation of actions.
 - [x] ~~Connection-aware message routing~~ → **Connection Gate subflow; RETENTION_MS=0 default for notifications**
 - [x] ~~Notification recipient/channel model~~ → **Person-centric config; `channels` and `recipients` required; graceful degradation**
 - [x] ~~Utility: Notifications~~ → **Built and tested; HA Companion delivery, Connection Gate, person lookup, clear path**
-- [ ] **Fan-out routing pattern** — scalable approach for routing to N channel delivery groups without growing switch node outputs or multi-output function nodes; `link call` with dynamic `msg.target` is a candidate, requires all paths to return to caller; more elegant solution TBD
+- [x] ~~Fan-out routing pattern~~ → **`link call` with dynamic `msg.target`; `resolveLinkTarget()` maps channel keys to `Link In` node names; delivery groups return via `link out` (return mode); catch node handles timeouts**
 - [ ] **Action responses** — deferred until actionable notifications are implemented
 - [ ] **Utility: Scheduler** — period transitions and task events
 
