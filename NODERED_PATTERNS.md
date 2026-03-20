@@ -740,6 +740,7 @@ Centralized ACK tracking for flows that need confirmation of actions.
 - [x] ~~Notification recipient/channel model~~ → **Person-centric config; `channels` and `recipients` required; graceful degradation**
 - [x] ~~Utility: Notifications~~ → **Built and tested; HA Companion delivery, Connection Gate, person lookup, clear path**
 - [x] ~~Fan-out routing pattern~~ → **`link call` with dynamic `msg.target`; `resolveLinkTarget()` maps channel keys to `Link In` node names; delivery groups return via `link out` (return mode); catch node handles timeouts**
+- [ ] **Namespaced target addressing** — replace `channels` + `recipients` with `targets: ["people.joseph.ha_companion", "areas.living_room.webos_tv", "areas.*.webos_tv"]`; `Build Targets` becomes a resolver; `*` wildcard expands all keys in a namespace section; eliminates channel × recipient matrix noise; enables area-addressed delivery (e.g. LG WebOS TVs); adding a new device only requires updating `notifications.json`
 - [ ] **Action responses** — deferred until actionable notifications are implemented
 - [ ] **Utility: Scheduler** — period transitions and task events
 
