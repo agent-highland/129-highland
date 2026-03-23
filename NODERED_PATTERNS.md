@@ -572,11 +572,11 @@ Centralized delivery of notifications to people and areas via configured channel
 
 **HA Companion Delivery** — Link In (`Home Assistant Companion`) → Connection Gate → Build Service Call → HA service call node → `link out` (return mode)
 
-**Television Routing** — Link In (`Television Routing`) → Resolve TV Endpoint → `link call` (dynamic) → `link out` (return mode) *(pending)*
+**Television Delivery** — Link In (`Television Delivery`) → Set Entity ID → Get TV State → Resolve Endpoint (2 outputs) → `link call` TV Dispatch / `link out` return
 
-**Android TV Delivery** — Link In (`Android TV Delivery`) → Build Android TV Call → HA service call node → `link out` (return mode) *(pending)*
+**Android TV Delivery** — Link In (`Android TV Delivery`) → Build Android TV Call → HA service call node → `link out` (return mode)
 
-**WebOS Delivery** — Link In (`WebOS Delivery`) → Build WebOS Call → HA service call node → `link out` (return mode) *(pending)*
+**WebOS Delivery** — Link In (`WebOS Delivery`) → Build WebOS Call → HA service call node → `link out` (return mode)
 
 **Clear Notification** — MQTT in (`highland/command/notify/clear`) → Initializer Latch → Build Clear Call → `link call` (Deliver, dynamic) → Log Event link out
 
@@ -622,7 +622,7 @@ node.send({
 function resolveLinkTarget(channel) {
     switch (channel) {
         case 'ha_companion': return 'Home Assistant Companion';
-        case 'tv':           return 'Television Routing';
+        case 'tv':           return 'Television Delivery';
         default: throw new Error(`Unable to resolve channel: ${channel}`);
     }
 }
@@ -638,7 +638,7 @@ Reads `msg.target` dynamically and routes to the matching `Link In` node name. S
 
 `CONNECTION_TYPE = home_assistant`, `CONTEXT_PREFIX = ha-`, `RETENTION_MS = 0`. Output 2 unwired — if HA is down the message drops. Resiliency is the caller's responsibility via target selection.
 
-### Build Service Call
+### Build Service Call (HA Companion)
 
 Handles both delivery and clear paths, branched on `_delivery.type`:
 
@@ -670,17 +670,42 @@ return msg;
 
 **`api-call-service` node:** Action field blank (reads `msg.payload.action` implicitly); Data field = JSONata `payload.data`.
 
-### Television Routing Group
+### Television Delivery Group
 
-Receives `tv` channel deliveries and determines the actual endpoint based on HA state:
+Receives `tv` channel deliveries. Queries HA for the TV's current state, resolves the current source to an endpoint type, and dispatches to the appropriate technology-specific delivery group via a second `link call`.
 
-1. Read `media_player` entity from `_delivery.address.media_player`
-2. If entity state is `off` or unavailable → WARN log, return (drop)
-3. Read `source` attribute from HA entity state
-4. Find matching entry in `_delivery.address.sources` — if not found → WARN log, return (drop)
-5. Look up `_delivery.address.endpoints[matchedSource.type]` → set as actual delivery address
-6. Set `msg.target` = matching delivery group name (e.g. `'Android TV Delivery'`)
-7. Fire `link call` to dispatch; return path bubbles back up through this group
+**Resolve Endpoint logic (Output 1 = dispatch, Output 2 = return/drop):**
+- If `_delivery.type === 'clear'` → TV auto-dismisses; log at DEBUG level and return immediately via Output 2
+- If TV state is `off`, `unavailable`, or `unknown` → WARN log, Output 2 (drop)
+- Look up current `source` attribute in `_delivery.address.sources` — if not found → WARN log, Output 2 (drop)
+- Look up `_delivery.address.endpoints[matchedSource.type]` — if missing → WARN log, Output 2 (drop)
+- Set `msg.payload._delivery.address` = resolved endpoint address, set `msg.target` = delivery group name
+- Output 1 → TV Dispatch `link call` → technology-specific delivery group → return
+
+**`targetMap` in Resolve Endpoint:**
+```javascript
+const targetMap = {
+    android_tv: 'Android TV Delivery',
+    webos: 'WebOS Delivery'
+};
+```
+
+### Android TV Delivery Group
+
+Formats and sends `nfandroidtv` notifications via HA. Severity maps to display duration, color, and interrupt flag:
+
+| Severity | Duration | Color | Interrupt |
+|----------|----------|-------|-----------|
+| `low` | 4s | grey | 0 |
+| `medium` | 6s | cyan | 0 |
+| `high` | 10s | amber | 0 |
+| `critical` | 15s | red | 1 |
+
+Position defaults to `bottom-right`, font size `medium`, transparency `25%`. Images from `media.image` are passed via `data.image.url`. Clears are no-ops — `nfandroidtv` notifications auto-dismiss.
+
+### WebOS Delivery Group
+
+Formats and sends WebOS notifications via HA. Simple title + message overlay. Clears are no-ops — WebOS notifications auto-dismiss.
 
 ### Build Clear Call
 
@@ -788,9 +813,11 @@ Centralized ACK tracking for flows that need confirmation of actions.
 - [x] ~~Utility: Notifications~~ → **Built and tested; HA Companion delivery, Connection Gate, namespace resolver, clear path**
 - [x] ~~Fan-out routing pattern~~ → **`link call` with dynamic `msg.target`; `resolveLinkTarget()` maps channel keys to `Link In` node names; delivery groups return via `link out` (return mode); catch node handles timeouts**
 - [x] ~~Namespaced target addressing~~ → **Implemented; `Build Targets` and `Build Clear Call` both use namespace resolver with wildcard; `notifications.json` has `people` and `areas` sections**
-- [ ] **Television Routing group** — HA state lookup on `media_player` entity; resolve current source against `sources` array; dispatch to `Android TV Delivery` or `WebOS Delivery` via `link call`; unknown source → WARN log, drop; TV off → WARN log, drop
-- [ ] **Android TV Delivery group** — `nfandroidtv` service call adapter via HA; clears are no-ops (auto-dismiss)
-- [ ] **WebOS Delivery group** — WebOS notify service call adapter via HA; clears are no-ops (auto-dismiss)
+- [x] ~~Television Delivery group~~ → **Built; HA state lookup, source → endpoint type resolution, dispatches to Android TV or WebOS via `link call`; unknown source and TV-off both log WARN and drop**
+- [x] ~~Android TV Delivery group~~ → **Built; `nfandroidtv` via HA; severity maps to duration/color/interrupt; clears are no-ops**
+- [x] ~~WebOS Delivery group~~ → **Built; WebOS notify via HA; clears are no-ops**
+- [ ] **Echo Show / View Assist** — LineageOS Echo Show devices running View Assist; determine whether HA registers them as `mobile_app_*` (→ `ha_companion` channel, no new plumbing) or as Android TV devices (→ `android_tv` endpoint type); add to `notifications.json` accordingly after setup
+- [ ] **Voice notifications** — Completely separate from visual notifications; different payload schema (`tts_text`, target speaker, voice/language, volume, interruptible vs queued); publish to `highland/event/speak`; handled by a future `Utility: Voice` flow; callers may publish to both `highland/event/notify` and `highland/event/speak` independently when both visual and spoken delivery is desired
 - [ ] **Action responses** — deferred until actionable notifications are implemented
 - [ ] **Utility: Scheduler** — period transitions and task events
 
