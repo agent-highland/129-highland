@@ -1,0 +1,12 @@
+{
+  "models": {
+    "PS-S04D": {
+      "battery": { "type": "CR2450", "quantity": 2 }
+    }
+  },
+  "overrides": {
+    "office_desk_presence": {
+      "friendly_name": "Joseph's Desk Presence"
+    }
+  }
+}
