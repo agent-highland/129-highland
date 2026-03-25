@@ -39,6 +39,7 @@ Captured ideas for future automations. Not requirements — just things worth ex
 
 | Idea | Notes | Added |
 |------|-------|-------|
+| Externalize Daily Digest HTML template | `Build Email` function node contains the full HTML template inline, making it painful to maintain. Move template to a file in `/home/nodered/config/templates/daily-digest.html`, load via Config Loader at startup into `global.config.digestTemplate`. `Build Email` then performs string replacement against the loaded template rather than generating HTML inline. SVG weather icons could move to a separate lookup file too. | 2026-03-25 |
 
 ### Presence & Occupancy
 
@@ -92,7 +93,7 @@ Replace LLM Vision integration with a fully Node-RED-owned video analysis pipeli
 - Keyframe/clip capture
 - Gemini triage (worth deep analysis?)
 - Gemini deep analysis (full scene description)
-- Media storage to HA `/media/analysis/...`
+- Media storage to HA `/media/analysis/.../`
 - Calendar event creation via `calendar.create_event`
 
 **Calendar Event Schema**
@@ -140,4 +141,4 @@ Description:
 
 ---
 
-*Last Updated: 2026-03-23*
+*Last Updated: 2026-03-25*
