@@ -39,6 +39,7 @@ Captured ideas for future automations. Not requirements — just things worth ex
 
 | Idea | Notes | Added |
 |------|-------|-------|
+| Externalize Daily Digest HTML template | `Build Email` function node contains the full HTML template inline, making it painful to maintain. Move template to a file in `/home/nodered/config/templates/daily-digest.html`, load via Config Loader at startup into `global.config.digestTemplate`. `Build Email` then performs string replacement against the loaded template rather than generating HTML inline. SVG weather icons could move to a separate lookup file too. See `nodered/DAILY_DIGEST.md`. | 2026-03-25 |
 
 ### Presence & Occupancy
 
@@ -49,6 +50,8 @@ Captured ideas for future automations. Not requirements — just things worth ex
 
 | Idea | Notes | Added |
 |------|-------|-------|
+| Host metrics monitoring | CPU load, memory usage, disk usage, and operating temperatures for Hub and Workflow hosts. Lightweight agent script per host publishes to `highland/status/{host}/metrics` (retained); Health Monitor evaluates against thresholds from `thresholds.json`. Hub will also need per-container metrics via `docker stats`. Revisit when baseline is stable and there is a concrete reason to care. | 2026-03-23 |
+| Device auto-discovery | When a payload arrives from an unregistered device, create a provisional device_registry.json entry (key, derived name, protocol, topic, partial capabilities inferred from payload fields) and flag for human review via notification or daily digest. Reduces manual registry maintenance from "author from scratch" to "review and enrich". Z2M bridge/devices topic provides protocol, topic, and modelID to bootstrap the entry. | 2026-03-23 |
 
 ### AI & Advanced
 
@@ -69,9 +72,11 @@ Major efforts that enable new capabilities across the system.
 
 ### Video Analysis Pipeline & Database Infrastructure
 
-**Priority:** Future (Post-Phase 1)  
-**Complexity:** High  
+**Priority:** Future (Post-Phase 1)
+**Complexity:** High
 **Added:** 2026-03-02
+
+See `subsystems/VIDEO_PIPELINE.md` for the full design.
 
 #### Overview
 
@@ -80,7 +85,7 @@ Replace LLM Vision integration with a fully Node-RED-owned video analysis pipeli
 #### Components
 
 **PostgreSQL Infrastructure**
-- Deploy PostgreSQL container on Workflow
+- Deploy PostgreSQL container on Node-RED/Utility box
 - Configure HA Recorder to use external PostgreSQL
 - Validate concurrent write capability (HA + Node-RED)
 - Establish backup/retention strategy
@@ -138,4 +143,4 @@ Description:
 
 ---
 
-*Last Updated: 2026-03-11*
+*Last Updated: 2026-03-26*

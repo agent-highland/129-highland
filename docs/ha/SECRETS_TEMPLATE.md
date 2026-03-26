@@ -31,7 +31,7 @@ Unified reference for all credentials, keys, tokens, and service accounts across
 ## 1. Network Infrastructure
 
 | Host | Hostname | IP Address | Hardware |
-|---|---|---|---|
+|------|----------|------------|----------|
 | Communication Hub | `hub.local` | `FILL_IN` | Dell OptiPlex 7050 MFF |
 | HAOS | `home.local` | `FILL_IN` | Dell OptiPlex 7050 SFF |
 | Workflow | `workflow.local` | `FILL_IN` | Dell OptiPlex 7050 SFF |
@@ -45,7 +45,7 @@ Unified reference for all credentials, keys, tokens, and service accounts across
 Serial dongles on the Communication Hub. Stable by-id paths — update only if hardware changes.
 
 | Device | By-ID Path |
-|---|---|
+|--------|------------|
 | Zigbee dongle (SONOFF MG24) | `/dev/serial/by-id/FILL_IN` |
 | Z-Wave dongle (SONOFF PZG23) | `/dev/serial/by-id/FILL_IN` |
 
@@ -58,7 +58,7 @@ Serial dongles on the Communication Hub. Stable by-id paths — update only if h
 Used for admin access to Ubuntu hosts (hub, workflow).
 
 | Field | Value |
-|---|---|
+|-------|-------|
 | Private key path | `FILL_IN` (e.g. `~/.ssh/highland`) |
 | Public key fingerprint | `FILL_IN` |
 | Passphrase | `FILL_IN` |
@@ -68,7 +68,7 @@ Authorized on: `hub`, `workflow`
 ### OS User Accounts
 
 | Host | Username | Password |
-|---|---|---|
+|------|----------|----------|
 | hub | `highland` | `FILL_IN` |
 | workflow | `highland` | `FILL_IN` |
 
@@ -80,7 +80,7 @@ Mosquitto broker on the Communication Hub. Per-service accounts — each service
 Stored in `/opt/highland/mosquitto/config/password.txt`.
 
 | Account | Password | Used By |
-|---|---|---|
+|---------|----------|---------|
 | `svc_zigbee2mqtt` | `FILL_IN` | Zigbee2MQTT container |
 | `svc_zwavejs` | `FILL_IN` | Z-Wave JS UI container |
 | `svc_nodered` | `FILL_IN` | Node-RED |
@@ -94,7 +94,7 @@ Stored in `/opt/highland/mosquitto/config/password.txt`.
 Deployed on the Workflow host. Shared between HA Recorder and the video pipeline.
 
 | Field | Value |
-|---|---|
+|-------|-------|
 | Host | `workflow.local` |
 | Port | `5432` |
 | Username | `highland` |
@@ -120,7 +120,7 @@ S2 keys secure Z-Wave device pairing. Required to restore paired devices if the 
 Export from Z-Wave JS UI: **Settings → Backup → Export**
 
 | Key Type | Value |
-|---|---|
+|----------|-------|
 | S2 Unauthenticated | `FILL_IN` |
 | S2 Authenticated | `FILL_IN` |
 | S2 Access Control | `FILL_IN` |
@@ -133,7 +133,7 @@ Export from Z-Wave JS UI: **Settings → Backup → Export**
 ### Admin Account
 
 | Field | Value |
-|---|---|
+|-------|-------|
 | Username | `FILL_IN` |
 | Password | `FILL_IN` |
 | Internal URL | `http://home.local:8123` |
@@ -142,13 +142,13 @@ Export from Z-Wave JS UI: **Settings → Backup → Export**
 ### Long-Lived Access Tokens
 
 | Token Name | Value | Used By |
-|---|---|---|
+|------------|-------|---------|
 | `node-red` | `FILL_IN` | Node-RED HA integration |
 
 ### Nabu Casa
 
 | Field | Value |
-|---|---|
+|-------|-------|
 | Account email | `FILL_IN` |
 | Account password | `FILL_IN` |
 | Remote URL | `FILL_IN` |
@@ -160,7 +160,7 @@ Export from Z-Wave JS UI: **Settings → Backup → Export**
 Healthchecks.io ping URLs. Treat like passwords — knowledge of the URL allows resetting the monitor.
 
 | Check | Period | Ping URL |
-|---|---|---|
+|-------|--------|----------|
 | `highland-node-red` | 1 min | `https://hc-ping.com/FILL_IN` |
 | `highland-hub-backup` | 24h | `https://hc-ping.com/FILL_IN` |
 | `highland-workflow-backup` | 24h | `https://hc-ping.com/FILL_IN` |
@@ -169,10 +169,10 @@ Healthchecks.io ping URLs. Treat like passwords — knowledge of the URL allows 
 
 ## 9. Email (Outbound — SMTP)
 
-Used for daily digest notifications.
+Used for Daily Digest notifications.
 
 | Field | Value |
-|---|---|
+|-------|-------|
 | Provider | `FILL_IN` |
 | SMTP host | `FILL_IN` |
 | SMTP port | `587` |
@@ -186,10 +186,10 @@ Used for daily digest notifications.
 ## 10. Email (Inbound — IMAP)
 
 Used by the LoRaWAN mailbox flow to parse USPS Informed Delivery emails.
-Hosted via Dynu at `highland@your-domain.example`.
+Hosted at `highland@your-domain.example`.
 
 | Field | Value |
-|---|---|
+|-------|-------|
 | IMAP host | `FILL_IN` |
 | IMAP port | `993` (SSL) |
 | SMTP host | `FILL_IN` |
@@ -204,17 +204,17 @@ Hosted via Dynu at `highland@your-domain.example`.
 ### 11.1 Pirate Weather
 
 | Field | Value |
-|---|---|
+|-------|-------|
 | API key | `FILL_IN` |
 | Plan | `FILL_IN` |
 | Endpoint | `https://api.pirateweather.net/forecast` |
 
 ### 11.2 Google Calendar
 
-Used for the daily digest and camera opt-out integration (each camera has a dedicated calendar guest address).
+Used for the Daily Digest and camera suppression integration (each camera has a dedicated calendar guest address).
 
 | Field | Value |
-|---|---|
+|-------|-------|
 | API key | `FILL_IN` |
 | Service account email | `FILL_IN` |
 | Main calendar ID | `FILL_IN` |
@@ -222,11 +222,11 @@ Used for the daily digest and camera opt-out integration (each camera has a dedi
 **Camera opt-out addresses** — invite these as guests to suppress monitoring for the event duration:
 
 | Camera | Calendar Email |
-|---|---|
+|--------|----------------|
 | `FILL_IN` | `FILL_IN@your-domain.example` |
 | `FILL_IN` | `FILL_IN@your-domain.example` |
 | `FILL_IN` | `FILL_IN@your-domain.example` |
 
 ---
 
-*Template version: 2026-03-16 — Add new sections here as infrastructure grows.*
+*Template version: 2026-03-26 — Add new sections here as infrastructure grows.*

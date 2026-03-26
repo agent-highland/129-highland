@@ -580,7 +580,6 @@ services:
       - "hub.local:HUB_IP_ADDRESS"      # Add other .local hosts Node-RED needs to reach
     environment:
       - TZ=America/New_York
-      - NODE_RED_CREDENTIAL_SECRET=your-generated-secret-here
     # user: "1000:1000"  # Match host user if needed
 
   # Optional: code-server for VS Code in browser
@@ -626,18 +625,21 @@ Install via Node-RED UI (Menu → Manage Palette → Install):
 
 ### 3.8 Settings.js Configuration
 
-Edit `/opt/highland/nodered/data/settings.js`:
+Edit `/opt/highland/nodered/data/settings.js`. See `nodered/ENVIRONMENT.md` for the full context storage config.
 
 ```javascript
 // Find and update credentialSecret — read from env var, never hardcode:
 credentialSecret: process.env.NODE_RED_CREDENTIAL_SECRET,
 
-// Find contextStorage section and update to dual store:
+// Find contextStorage section and update to three-store config:
 contextStorage: {
     default: {
         module: "localfilesystem"
     },
     initializers: {
+        module: "memory"
+    },
+    volatile: {
         module: "memory"
     }
 },
@@ -690,27 +692,21 @@ In Node-RED:
 cd /home/nodered/config
 
 # Create empty config files
-touch device_registry.json
-touch flow_registry.json
-touch notifications.json
-touch thresholds.json
-touch healthchecks.json
-touch secrets.json
-touch README.md
+touch device_registry.json device_catalog.json flow_registry.json \
+      notifications.json thresholds.json healthchecks.json \
+      system.json location.json secrets.json README.md
 ```
 
 **Initialize with empty/default JSON:**
 
 ```bash
-echo '{}' > device_registry.json
-echo '{}' > flow_registry.json
-echo '{}' > notifications.json
-echo '{}' > thresholds.json
-echo '{}' > healthchecks.json
-echo '{}' > secrets.json
+for f in device_registry device_catalog flow_registry notifications \
+          thresholds healthchecks system location secrets; do
+    echo '{}' > ${f}.json
+done
 ```
 
-*Populate these as you build flows. See NODERED_PATTERNS.md for structure.*
+*Populate these as you build flows. See `nodered/CONFIG_MANAGEMENT.md` for full structure and example configs.*
 
 ### 3.11 HA Sidebar Panel (Optional)
 
@@ -768,7 +764,7 @@ recorder:
   purge_keep_days: 30
 ```
 
-> **HAOS and .local hostnames:** HAOS sometimes resolves `.local` hostnames to IPv6 link-local addresses (`fe80::...`), which psycopg2 and other service clients can't use, resulting in `Invalid argument` or `Name has no usable address` errors. The workaround is to use the IPv4 address directly, either as the host in the URL or via the `?host=` parameter as shown above. This applies to any service HAOS connects to by hostname — MQTT broker, database, etc. A proper fix requires either router-level DNS with IPv4 A records, or a local DNS resolver (Pi-hole, AdGuard Home, nginx) that serves authoritative IPv4 responses for local hostnames.
+> **HAOS and .local hostnames:** HAOS sometimes resolves `.local` hostnames to IPv6 link-local addresses (`fe80::...`), which psycopg2 and other service clients can't use, resulting in `Invalid argument` or `Name has no usable address` errors. The workaround is to use the IPv4 address directly, either as the host in the URL or via the `?host=` parameter as shown above. This applies to any service HAOS connects to by hostname — MQTT broker, database, etc. See `architecture/NETWORK.md` for more detail.
 
 Restart Home Assistant after saving:
 - Settings → System → Restart
@@ -813,7 +809,7 @@ Camera infrastructure (Reolink NVR).
 3. Enter NVR IP address and credentials
 4. Cameras should appear as entities
 
-**Entity naming (per ENTITY_NAMING.md):**
+**Entity naming (per `standards/ENTITY_NAMING.md`):**
 - May need to rename entities to match conventions
 - e.g., `camera.driveway_feed_fluent`, `camera.driveway_feed_clear`
 
@@ -871,44 +867,16 @@ sudo chmod +x /usr/local/bin/highland-backup.sh
 echo "15 3 * * * root /usr/local/bin/highland-backup.sh" | sudo tee /etc/cron.d/highland-backup
 ```
 
-**Workflow Host:** Backup handled by Backup Utility Flow (see NODERED_PATTERNS.md).
-
-### Communication Hub Health Script
-
-**Create `/etc/highland/secrets` on Hub:**
-```bash
-sudo mkdir -p /etc/highland
-sudo tee /etc/highland/secrets > /dev/null << 'EOF'
-HEALTHCHECKS_HUB_URL=https://hc-ping.com/YOUR-UUID-HERE
-EOF
-sudo chmod 600 /etc/highland/secrets
-```
-
-**Create `/usr/local/bin/highland-hub-health.sh`:**
-```bash
-#!/bin/bash
-# Highland Communication Hub — Healthchecks.io self-report
-
-source /etc/highland/secrets
-curl -fsS -m 10 --retry 3 "$HEALTHCHECKS_HUB_URL" > /dev/null 2>&1
-```
-
-```bash
-sudo chmod +x /usr/local/bin/highland-hub-health.sh
-echo "* * * * * root /usr/local/bin/highland-hub-health.sh" | sudo tee /etc/cron.d/highland-hub-health
-```
-
-Create `Communication Hub` check in Healthchecks.io: 1 minute period, 3 minute grace.
+**Workflow Host:** Backup handled by Backup Utility Flow in Node-RED. See `architecture/BACKUP_RECOVERY.md` for architecture and `nodered/HEALTH_MONITORING.md` for the flow design.
 
 ### Watchdog Script
 
-> **Note:** The original watchdog design below — subscribing to Node-RED's MQTT heartbeat and pinging Healthchecks.io on receipt — has been superseded. Node-RED now pings Healthchecks.io directly via HTTP from the Health Monitor flow, which correctly separates Node-RED liveness from MQTT liveness. If MQTT goes down but Node-RED is up, the original design would have falsely reported Node-RED as unhealthy.
+> **Note:** The original watchdog design below — subscribing to Node-RED's MQTT heartbeat and pinging Healthchecks.io on receipt — has been superseded. Node-RED now pings Healthchecks.io directly via HTTP from the Health Monitor flow, which correctly separates Node-RED liveness from MQTT liveness. See `nodered/HEALTH_MONITORING.md`.
 >
 > Whether a watchdog script has a remaining role will be determined as each Health Monitor service check is designed. The script below is retained as a reference only.
 
 **Original design (reference only — do not deploy):**
 
-**Create `/usr/local/bin/highland-watchdog.sh` on Workflow host:**
 ```bash
 #!/bin/bash
 # Highland Watchdog - Monitors Node-RED heartbeat
@@ -933,19 +901,14 @@ fi
 
 ### Healthchecks.io Setup
 
-Create checks for each service. All checks: 1 minute period, 3 minute grace.
+1. Create account at healthchecks.io
+2. Create checks for:
+   - `highland-node-red` (1 min period, 3 min grace)
+   - `highland-hub-backup` (24h period, 1h grace)
+   - `highland-workflow-backup` (24h period, 1h grace)
+3. Copy ping URLs to `secrets.json`
 
-**Self-report checks (service pings directly):**
-- `Node-RED` — pinged by Node-RED Health Monitor flow
-- `Home Assistant` — pinged by native HA automation via rest_command
-- `Communication Hub` — pinged by hub cron script
-
-**Edge checks (Node-RED pings on behalf of connection):**
-- `Node-RED / Home Assistant Edge` — Node-RED HTTP check to HA API
-
-Additional edge checks (MQTT, Z2M, Z-Wave JS) added as each service check is implemented.
-
-Store all ping URLs in `secrets.json` under `healthchecks_io`.
+See `nodered/HEALTH_MONITORING.md` for the full check matrix and grace period rationale.
 
 ### Log Rotation
 
@@ -966,10 +929,9 @@ Store all ping URLs in `secrets.json` under `healthchecks_io`.
 
 Create these flows in Node-RED to establish baseline functionality:
 
-1. **Utility: Initializers** — Populate initializers context store on startup ✅
-2. **Utility: Config Loader** — Load config files on startup ✅
-3. **Utility: Health Checks** — Node-RED and HA health checks ✅
-4. **Utility: Logging** — Subscribe to `highland/event/log`, write to JSONL ✅
+1. **Config Loader** — Load config files on startup (see `nodered/CONFIG_MANAGEMENT.md`)
+2. **Health Monitor** — Publish heartbeat every 30 seconds (see `nodered/HEALTH_MONITORING.md`)
+3. **Logging Utility** — Subscribe to `highland/event/log`, write to JSONL (see `nodered/LOGGING.md`)
 
 ### First Device Migration Test
 
@@ -1009,7 +971,6 @@ Create these flows in Node-RED to establish baseline functionality:
 |-------|--------|
 | Hub backup script installed | ☐ |
 | Hub backup cron configured | ☐ |
-| Hub health script installed | ☐ |
 | Healthchecks.io checks configured | ☐ |
 | Node-RED Health Monitor pinging Healthchecks.io | ☐ |
 | Log rotation configured | ☐ |
@@ -1025,4 +986,4 @@ Create these flows in Node-RED to establish baseline functionality:
 
 ---
 
-*Last Updated: 2026-03-19*
+*Last Updated: 2026-03-26*

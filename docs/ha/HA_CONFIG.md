@@ -1,14 +1,10 @@
 # Home Assistant Configuration
 
-Documents the structure and conventions for Highland's Home Assistant configuration.
-
----
-
 ## Philosophy
 
-HA is a **consumer and dashboard layer** in Highland — not the automation engine. Most devices are exposed through Zigbee2MQTT and Z-Wave JS UI via MQTT discovery. Direct HA configuration changes are expected to be infrequent.
+HA is a **consumer and dashboard layer** in Highland — not the automation engine. Most devices are exposed through Zigbee2MQTT and Z-Wave JS UI via MQTT Discovery. Direct HA configuration changes are expected to be infrequent.
 
-Configuration is kept lean: only what HA cannot do via the UI or MQTT discovery goes into YAML.
+Configuration is kept lean: only what HA cannot do via the UI or MQTT Discovery goes into YAML.
 
 ---
 
@@ -47,10 +43,10 @@ recorder: !include recorder.yaml
 rest_command: !include rest_commands.yaml
 ```
 
-> **Include type rules:**
-> - `!include_dir_merge_list` — for automations and other list-based config
-> - `!include_dir_merge_named` — for scripts, scenes, and other dictionary-based config
-> - `!include` — for single files
+**Include type rules:**
+- `!include_dir_merge_list` — for automations and other list-based config
+- `!include_dir_merge_named` — for scripts, scenes, and other dictionary-based config
+- `!include` — for single files
 
 ---
 
@@ -86,6 +82,8 @@ purge_keep_days: 30
 ```
 
 > **Note:** File contains only the values — no `recorder:` top-level key. That key lives in `configuration.yaml` via `!include`.
+
+> **HAOS and .local hostnames:** HAOS sometimes resolves `.local` hostnames to IPv6 link-local addresses (`fe80::...`), which psycopg2 cannot use. Use the IPv4 address directly in `recorder_db_url`. See `RUNBOOK.md` section 3.14.
 
 ---
 
@@ -174,7 +172,7 @@ HA pings Healthchecks.io directly via `rest_command`, independent of Node-RED. T
 | `Home Assistant / Zigbee Edge` | HA can see Zigbee devices via Z2M/MQTT |
 | `Home Assistant / Z-Wave Edge` | HA can see Z-Wave devices via Z-Wave JS UI |
 
-See NODERED_PATTERNS.md Health Monitoring section for the full failure signature matrix.
+See `nodered/HEALTH_MONITORING.md` for the full failure signature matrix.
 
 ---
 
@@ -187,8 +185,8 @@ See NODERED_PATTERNS.md Health Monitoring section for the full failure signature
 | New rest_command | `rest_commands.yaml` |
 | New secret reference | `secrets.yaml` + `secrets_template.yaml` |
 | New integration | HA UI (Settings → Devices & Services) — not YAML |
-| New device | MQTT discovery via Z2M or Z-Wave JS — not YAML |
+| New device | MQTT Discovery via Z2M or Z-Wave JS — not YAML |
 
 ---
 
-*Last Updated: 2026-03-19*
+*Last Updated: 2026-03-26*
