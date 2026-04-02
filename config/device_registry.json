@@ -145,6 +145,12 @@
         "type": "CR2450",
         "quantity": 2
       }
+    },
+    "SNZB-02P": {
+      "battery": {
+        "type": "CR2477",
+        "quantity": 1
+      }
     }
   },
   "meta": {
