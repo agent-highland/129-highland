@@ -1,0 +1,566 @@
+[
+    {
+        "id": "utility-weather-station",
+        "type": "tab",
+        "label": "Utility: Weather Station",
+        "disabled": false,
+        "info": "",
+        "env": []
+    },
+    {
+        "id": "ff56cebe969cb697",
+        "type": "group",
+        "z": "utility-weather-station",
+        "name": "Home Assistant Discovery",
+        "style": {
+            "label": true
+        },
+        "nodes": [
+            "2271d2fc92f367e7",
+            "72fb05d2ea197f3d",
+            "9bb4c8d11986ede6"
+        ],
+        "x": 54,
+        "y": 699,
+        "w": 612,
+        "h": 82
+    },
+    {
+        "id": "793174e62189ccfb",
+        "type": "group",
+        "z": "utility-weather-station",
+        "name": "Tempest Events",
+        "style": {
+            "label": true
+        },
+        "nodes": [
+            "2a8ee55f66340548",
+            "9e30fa0190c07780",
+            "850150025c92d364",
+            "dd814a46cb7baf68",
+            "a646953ba083b7af",
+            "b7fed3745da39279",
+            "4cd616612c873c95",
+            "ccb31aecb0ee3350",
+            "78f840fb95649442",
+            "86df96821359b9fd",
+            "404a3cf1530c659a",
+            "5fb8dcdd4f24cac9",
+            "4c39c49fb5248bb4",
+            "2c875c9f675ce3e2",
+            "d3934a165acb13c3"
+        ],
+        "x": 54,
+        "y": 39,
+        "w": 592,
+        "h": 502
+    },
+    {
+        "id": "01e6abb3808d0e60",
+        "type": "group",
+        "z": "utility-weather-station",
+        "name": "Event Sinks",
+        "style": {
+            "label": true
+        },
+        "nodes": [
+            "a63474c91619b71b",
+            "cd700ed9e434f76a",
+            "e882273679663011",
+            "22d9c1f038973cad"
+        ],
+        "x": 54,
+        "y": 579,
+        "w": 812,
+        "h": 82
+    },
+    {
+        "id": "f1217c591455b2e0",
+        "type": "group",
+        "z": "utility-weather-station",
+        "name": "Error Handling",
+        "style": {
+            "label": true
+        },
+        "nodes": [
+            "eefe19c83873cdeb",
+            "2058b51a2c24d25f"
+        ],
+        "x": 54,
+        "y": 819,
+        "w": 352,
+        "h": 82
+    },
+    {
+        "id": "a63474c91619b71b",
+        "type": "udp in",
+        "z": "utility-weather-station",
+        "g": "01e6abb3808d0e60",
+        "name": "Tempest Listener",
+        "iface": "",
+        "port": "50223",
+        "ipv": "udp4",
+        "multicast": "false",
+        "group": "",
+        "datatype": "buffer",
+        "x": 160,
+        "y": 620,
+        "wires": [
+            [
+                "cd700ed9e434f76a"
+            ]
+        ]
+    },
+    {
+        "id": "cd700ed9e434f76a",
+        "type": "function",
+        "z": "utility-weather-station",
+        "g": "01e6abb3808d0e60",
+        "name": "Decode Buffer",
+        "func": "msg.payload = JSON.parse(msg.payload.toString());\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 380,
+        "y": 620,
+        "wires": [
+            [
+                "e882273679663011"
+            ]
+        ]
+    },
+    {
+        "id": "e882273679663011",
+        "type": "function",
+        "z": "utility-weather-station",
+        "g": "01e6abb3808d0e60",
+        "name": "Build Target",
+        "func": "switch (msg.payload.type) {\n    case 'evt_precip':\n        msg.target = 'Precipitation Start';\n        break;\n    case 'evt_strike':\n        msg.target = 'Lightning Strike';\n        break;\n    case 'obs_st':\n        msg.target = 'Observation';\n        break;\n    case 'rapid_wind':\n        msg.target = 'Rapid Wind';\n        break;\n    default:\n        return null;\n}\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 590,
+        "y": 620,
+        "wires": [
+            [
+                "22d9c1f038973cad"
+            ]
+        ]
+    },
+    {
+        "id": "22d9c1f038973cad",
+        "type": "link call",
+        "z": "utility-weather-station",
+        "g": "01e6abb3808d0e60",
+        "name": "Dispatch",
+        "links": [],
+        "linkType": "dynamic",
+        "timeout": "30",
+        "x": 780,
+        "y": 620,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "2a8ee55f66340548",
+        "type": "link in",
+        "z": "utility-weather-station",
+        "g": "793174e62189ccfb",
+        "name": "Observation",
+        "links": [],
+        "x": 150,
+        "y": 80,
+        "wires": [
+            [
+                "9e30fa0190c07780"
+            ]
+        ],
+        "l": true
+    },
+    {
+        "id": "9e30fa0190c07780",
+        "type": "function",
+        "z": "utility-weather-station",
+        "g": "793174e62189ccfb",
+        "name": "Normalize",
+        "func": "const obs = msg.payload.obs[0];\n\nconst precipTypes = { 0: 'None', 1: 'Rain', 2: 'Hail', 3: 'Rain+Hail' };\n\n// Unit conversions\nconst msToMph  = v => Math.round(v * 2.23694 * 10) / 10;\nconst cToF     = v => Math.round((v * 9/5 + 32) * 10) / 10;\nconst mbToInHg = v => Math.round(v * 0.02953 * 100) / 100;\nconst mmToIn   = v => Math.round(v * 0.0393701 * 1000) / 1000;\nconst kmToMi   = v => Math.round(v * 0.621371 * 10) / 10;\n\nconst notification = {\n    topic: 'highland/event/weather/station/observation',\n    payload: JSON.stringify({\n        timestamp: new Date(obs[0] * 1000).toISOString(),\n        serial_number: msg.payload.serial_number,\n        source: 'tempest'\n    }),\n    retain: false\n}\n\nconst state = {\n    topic: 'highland/state/weather/station',\n    payload: JSON.stringify({\n        timestamp:          new Date(obs[0] * 1000).toISOString(),\n        wind_lull:          msToMph(obs[1]),\n        wind_avg:           msToMph(obs[2]),\n        wind_gust:          msToMph(obs[3]),\n        wind_direction:     obs[4],\n        pressure:           mbToInHg(obs[6]),\n        temperature:        cToF(obs[7]),\n        humidity:           obs[8],\n        uv_index:           obs[10],\n        solar_radiation:    obs[11],\n        rain_accumulated:   mmToIn(obs[12]),\n        precipitation_type: precipTypes[obs[13]] ?? 'None',\n        lightning_distance: obs[14] > 0 ? kmToMi(obs[14]) : null,\n        lightning_count:    obs[15],\n        battery:            obs[16],\n        report_interval:    obs[17],\n        source:             'tempest',\n        serial_number:      msg.payload.serial_number\n    }),\n    retain: true\n}\n\nnode.status({ fill: 'green', shape: 'dot',\n    text: `${cToF(obs[7])}°F ${obs[8]}% ${msToMph(obs[2])}mph`\n});\n\nnode.send([state, null]);\nnode.send([notification, null]);\n\nreturn [null, msg];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 340,
+        "y": 80,
+        "wires": [
+            [
+                "dd814a46cb7baf68"
+            ],
+            [
+                "850150025c92d364"
+            ]
+        ]
+    },
+    {
+        "id": "850150025c92d364",
+        "type": "link out",
+        "z": "utility-weather-station",
+        "g": "793174e62189ccfb",
+        "name": "Observation Return",
+        "mode": "return",
+        "links": [],
+        "x": 475,
+        "y": 140,
+        "wires": []
+    },
+    {
+        "id": "dd814a46cb7baf68",
+        "type": "mqtt out",
+        "z": "utility-weather-station",
+        "g": "793174e62189ccfb",
+        "name": "Dispatch",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "4cefa2ad2d8b462e",
+        "x": 520,
+        "y": 80,
+        "wires": []
+    },
+    {
+        "id": "2271d2fc92f367e7",
+        "type": "function",
+        "z": "utility-weather-station",
+        "g": "ff56cebe969cb697",
+        "name": "Build Sensors",
+        "func": "const device = {\n    identifiers: [\"highland_weather_station\"],\n    name: \"Highland Weather Station\",\n    model: \"Tempest\",\n    manufacturer: \"WeatherFlow\"\n};\n\nconst state_topic = \"highland/state/weather/station\";\nconst base = \"homeassistant/sensor/highland_weather_station\";\n\nconst sensors = [\n    {\n        id: \"temperature\",\n        name: \"Temperature\",\n        device_class: \"temperature\",\n        unit: \"°F\",\n        state_class: \"measurement\"\n    },\n    {\n        id: \"humidity\",\n        name: \"Humidity\",\n        device_class: \"humidity\",\n        unit: \"%\",\n        state_class: \"measurement\"\n    },\n    {\n        id: \"pressure\",\n        name: \"Pressure\",\n        device_class: \"atmospheric_pressure\",\n        unit: \"inHg\",\n        state_class: \"measurement\"\n    },\n    {\n        id: \"wind_avg\",\n        name: \"Wind Speed\",\n        unit: \"mph\",\n        state_class: \"measurement\"\n    },\n    {\n        id: \"wind_gust\",\n        name: \"Wind Gust\",\n        unit: \"mph\",\n        state_class: \"measurement\"\n    },\n    {\n        id: \"wind_lull\",\n        name: \"Wind Lull\",\n        unit: \"mph\",\n        state_class: \"measurement\"\n    },\n    {\n        id: \"wind_direction\",\n        name: \"Wind Direction\",\n        unit: \"°\",\n        state_class: \"measurement\"\n    },\n    {\n        id: \"uv_index\",\n        name: \"UV Index\",\n        state_class: \"measurement\"\n    },\n    {\n        id: \"solar_radiation\",\n        name: \"Solar Radiation\",\n        device_class: \"irradiance\",\n        unit: \"W/m²\",\n        state_class: \"measurement\"\n    },\n    {\n        id: \"rain_accumulated\",\n        name: \"Rain Accumulated\",\n        device_class: \"precipitation\",\n        unit: \"in\",\n        state_class: \"total_increasing\"\n    },\n    {\n        id: \"precipitation_type\",\n        name: \"Precipitation Type\"\n    },\n    {\n        id: \"lightning_distance\",\n        name: \"Lightning Distance\",\n        device_class: \"distance\",\n        unit: \"mi\"\n    },\n    {\n        id: \"lightning_count\",\n        name: \"Lightning Count\",\n        state_class: \"total_increasing\"\n    },\n    {\n        id: \"battery\",\n        name: \"Battery\",\n        device_class: \"voltage\",\n        unit: \"V\",\n        state_class: \"measurement\",\n        entity_category: \"diagnostic\"\n    }\n];\n\nfor (const s of sensors) {\n    const config = {\n        name: s.name,\n        unique_id: `highland_station_${s.id}`,\n        state_topic,\n        value_template: `{{ value_json.${s.id} }}`,\n        device\n    };\n\n    if (s.device_class)    config.device_class = s.device_class;\n    if (s.unit)            config.unit_of_measurement = s.unit;\n    if (s.state_class)     config.state_class = s.state_class;\n    if (s.entity_category) config.entity_category = s.entity_category;\n\n    node.send({\n        topic: `${base}/${s.id}/config`,\n        payload: JSON.stringify(config),\n        retain: true\n    });\n}\n\nreturn null;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 380,
+        "y": 740,
+        "wires": [
+            [
+                "9bb4c8d11986ede6"
+            ]
+        ]
+    },
+    {
+        "id": "72fb05d2ea197f3d",
+        "type": "inject",
+        "z": "utility-weather-station",
+        "g": "ff56cebe969cb697",
+        "name": "On Startup",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 170,
+        "y": 740,
+        "wires": [
+            [
+                "2271d2fc92f367e7"
+            ]
+        ]
+    },
+    {
+        "id": "9bb4c8d11986ede6",
+        "type": "mqtt out",
+        "z": "utility-weather-station",
+        "g": "ff56cebe969cb697",
+        "name": "Publish",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "4cefa2ad2d8b462e",
+        "x": 580,
+        "y": 740,
+        "wires": []
+    },
+    {
+        "id": "eefe19c83873cdeb",
+        "type": "catch",
+        "z": "utility-weather-station",
+        "g": "f1217c591455b2e0",
+        "name": "Catch All",
+        "scope": null,
+        "uncaught": false,
+        "x": 140,
+        "y": 860,
+        "wires": [
+            [
+                "2058b51a2c24d25f"
+            ]
+        ]
+    },
+    {
+        "id": "2058b51a2c24d25f",
+        "type": "debug",
+        "z": "utility-weather-station",
+        "g": "f1217c591455b2e0",
+        "name": "Output",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 310,
+        "y": 860,
+        "wires": []
+    },
+    {
+        "id": "a646953ba083b7af",
+        "type": "link in",
+        "z": "utility-weather-station",
+        "g": "793174e62189ccfb",
+        "name": "Precipitation Start",
+        "links": [],
+        "x": 170,
+        "y": 200,
+        "wires": [
+            [
+                "5fb8dcdd4f24cac9"
+            ]
+        ],
+        "l": true
+    },
+    {
+        "id": "b7fed3745da39279",
+        "type": "link out",
+        "z": "utility-weather-station",
+        "g": "793174e62189ccfb",
+        "name": "Precipitation Start Return",
+        "mode": "return",
+        "links": [],
+        "x": 515,
+        "y": 260,
+        "wires": []
+    },
+    {
+        "id": "4cd616612c873c95",
+        "type": "link in",
+        "z": "utility-weather-station",
+        "g": "793174e62189ccfb",
+        "name": "Lightning Strike",
+        "links": [],
+        "x": 160,
+        "y": 320,
+        "wires": [
+            [
+                "4c39c49fb5248bb4"
+            ]
+        ],
+        "l": true
+    },
+    {
+        "id": "ccb31aecb0ee3350",
+        "type": "link out",
+        "z": "utility-weather-station",
+        "g": "793174e62189ccfb",
+        "name": "Lightning Strike Return",
+        "mode": "return",
+        "links": [],
+        "x": 495,
+        "y": 380,
+        "wires": []
+    },
+    {
+        "id": "78f840fb95649442",
+        "type": "link in",
+        "z": "utility-weather-station",
+        "g": "793174e62189ccfb",
+        "name": "Rapid Wind",
+        "links": [],
+        "x": 150,
+        "y": 440,
+        "wires": [
+            [
+                "86df96821359b9fd",
+                "404a3cf1530c659a"
+            ]
+        ],
+        "l": true
+    },
+    {
+        "id": "86df96821359b9fd",
+        "type": "link out",
+        "z": "utility-weather-station",
+        "g": "793174e62189ccfb",
+        "name": "Rapid Wind Return",
+        "mode": "return",
+        "links": [],
+        "x": 295,
+        "y": 500,
+        "wires": []
+    },
+    {
+        "id": "404a3cf1530c659a",
+        "type": "debug",
+        "z": "utility-weather-station",
+        "g": "793174e62189ccfb",
+        "name": "Rapid Wind Output",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 370,
+        "y": 440,
+        "wires": []
+    },
+    {
+        "id": "5fb8dcdd4f24cac9",
+        "type": "function",
+        "z": "utility-weather-station",
+        "g": "793174e62189ccfb",
+        "name": "Normalize",
+        "func": "const evt = msg.payload.evt;\n\nnode.send([{\n    topic: 'highland/event/weather/station/precipitation_start',\n    payload: JSON.stringify({\n        timestamp: new Date(evt[0] * 1000).toISOString(),\n        serial_number: msg.payload.serial_number,\n        source: 'tempest'\n    }),\n    retain: false\n}, null]);\n\nnode.status({ fill: 'blue', shape: 'dot', text: 'Rain started' });\n\nreturn [null, msg];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 380,
+        "y": 200,
+        "wires": [
+            [
+                "2c875c9f675ce3e2"
+            ],
+            [
+                "b7fed3745da39279"
+            ]
+        ]
+    },
+    {
+        "id": "4c39c49fb5248bb4",
+        "type": "function",
+        "z": "utility-weather-station",
+        "g": "793174e62189ccfb",
+        "name": "Normalize",
+        "func": "const evt = msg.payload.evt;\nconst kmToMi = v => Math.round(v * 0.621371 * 10) / 10;\n\nnode.send([{\n    topic: 'highland/event/weather/station/lightning',\n    payload: JSON.stringify({\n        timestamp: new Date(evt[0] * 1000).toISOString(),\n        distance_miles: kmToMi(evt[1]),\n        energy: evt[2],\n        serial_number: msg.payload.serial_number,\n        source: 'tempest'\n    }),\n    retain: false\n}, null]);\n\nnode.status({ fill: 'yellow', shape: 'dot', \n    text: `Strike ${kmToMi(evt[1])}mi` \n});\n\nreturn [null,msg];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 360,
+        "y": 320,
+        "wires": [
+            [
+                "d3934a165acb13c3"
+            ],
+            [
+                "ccb31aecb0ee3350"
+            ]
+        ]
+    },
+    {
+        "id": "2c875c9f675ce3e2",
+        "type": "mqtt out",
+        "z": "utility-weather-station",
+        "g": "793174e62189ccfb",
+        "name": "Dispatch",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "4cefa2ad2d8b462e",
+        "x": 560,
+        "y": 200,
+        "wires": []
+    },
+    {
+        "id": "d3934a165acb13c3",
+        "type": "mqtt out",
+        "z": "utility-weather-station",
+        "g": "793174e62189ccfb",
+        "name": "Dispatch",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "4cefa2ad2d8b462e",
+        "x": 540,
+        "y": 320,
+        "wires": []
+    },
+    {
+        "id": "4cefa2ad2d8b462e",
+        "type": "mqtt-broker",
+        "name": "Hub",
+        "broker": "hub.local",
+        "port": 1883,
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": 4,
+        "keepalive": 60,
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    }
+]

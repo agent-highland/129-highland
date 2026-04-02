@@ -1,0 +1,17 @@
+[Unit]
+Description=Highland Tempest UDP Relay
+Documentation=https://github.com/Highland-SmartHome/129-highland
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/socat UDP-RECV:50222,reuseaddr UDP-SENDTO:127.0.0.1:50223
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=highland-tempest-relay
+
+[Install]
+WantedBy=multi-user.target

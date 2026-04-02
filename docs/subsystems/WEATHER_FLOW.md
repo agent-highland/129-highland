@@ -157,6 +157,74 @@ Tier 2 threshold values are initial estimates — calibrate against observed eve
 
 ---
 
+## Weather Station
+
+### Architecture
+
+WeatherFlow Tempest station broadcasts UDP packets on port 50222 to the LAN. A lightweight `socat` relay running as a systemd service (`highland-tempest-relay`) on the Workflow host receives the broadcast and unicasts to port 50223, where Node-RED's Docker container can receive it. Docker bridge networking does not forward broadcast traffic to containers, making the relay necessary.
+
+`Utility: Weather Station` is the sole consumer of the UDP stream. It decodes and dispatches all Tempest message types, normalizes observations to US customary units, and publishes to the MQTT bus.
+
+### Message Types
+
+| Type | Cadence | Handling |
+|------|---------|----------|
+| `obs_st` | Every 1 minute | Normalize → state + observation event |
+| `evt_precip` | On rain onset | Publish precipitation start event |
+| `evt_strike` | On lightning | Publish lightning event |
+| `rapid_wind` | Every 3 seconds | Plumbing in place, not yet processed |
+| `hub_status` | Every 10 seconds | Dropped (not yet handled) |
+| `device_status` | Every minute | Dropped (not yet handled) |
+
+### Flow Design
+
+`Utility: Weather Station` groups:
+
+| Group | Purpose |
+|-------|--------|
+| **Event Sinks** | UDP In → Decode Buffer → Build Target → Dispatch (dynamic link call) |
+| **Tempest Events** | Link-in handlers for each message type: Observation, Precipitation Start, Lightning Strike, Rapid Wind |
+| **Home Assistant Discovery** | On Startup → Build Sensors → MQTT Out (14 sensor configs, retained) |
+| **Error Handling** | Catch All → debug |
+
+The `Build Target` function sets `msg.target` to the link-in node name for each message type. The dynamic link call dispatches to the correct handler. Each handler normalizes its payload and returns via a return-mode link out.
+
+### Unit Conversions
+
+| Measurement | Raw Unit | Published Unit | Formula |
+|-------------|----------|---------------|---------|
+| Temperature | °C | °F | `(C × 9/5) + 32` |
+| Wind speed | m/s | mph | `× 2.23694` |
+| Pressure | mbar | inHg | `× 0.02953` |
+| Rain | mm | inches | `× 0.0393701` |
+| Lightning distance | km | miles | `× 0.621371` |
+
+### MQTT Topics
+
+See `standards/MQTT_TOPICS.md` — Weather Station section for full payload schemas.
+
+- `highland/state/weather/station` — retained, full normalized observation
+- `highland/event/weather/station/observation` — not retained, fires each minute
+- `highland/event/weather/station/precipitation_start` — not retained, optical sensor trigger
+- `highland/event/weather/station/lightning` — not retained, per-strike event
+
+### Infrastructure
+
+**Relay service:** `workflow/systemd/highland-tempest-relay.service`
+
+```
+socat UDP-RECV:50222,reuseaddr UDP-SENDTO:127.0.0.1:50223
+```
+
+**Docker port mapping** in `docker-compose.yml`:
+```yaml
+ports:
+  - "1880:1880"
+  - "50223:50223/udp"
+```
+
+---
+
 ## Radar Pipeline
 
 ### Architecture
@@ -322,4 +390,4 @@ The free tier is acceptable during development. Before go-live, upgrade to the *
 
 ---
 
-*Last Updated: 2026-04-01*
+*Last Updated: 2026-04-02*

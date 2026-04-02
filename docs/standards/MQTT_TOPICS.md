@@ -491,6 +491,164 @@ Runtime enable/disable of a specific radar product. The config listener patches 
 
 ---
 
+---
+
+### Weather Station
+
+**Architecture:** WeatherFlow Tempest station broadcasting UDP on port 50222 (LAN). A `socat` relay on the Workflow host (systemd: `highland-tempest-relay`) forwards to port 50223 where Node-RED's Docker container can receive it. `Utility: Weather Station` decodes and normalizes all Tempest message types.
+
+**Message types handled:**
+- `obs_st` — full observation every 1 minute → state + observation event
+- `evt_precip` — optical rain sensor trigger → precipitation start event
+- `evt_strike` — lightning detection → lightning event
+- `rapid_wind` — wind every 3 seconds → plumbing in place, not yet processed
+
+---
+
+#### State Topics (Retained)
+
+**`highland/state/weather/station`** ← RETAINED
+
+Normalized Tempest observation. Published once per minute on every `obs_st` message. All values converted to US customary units.
+
+| | |
+|--|--|
+| **Publisher** | Utility: Weather Station |
+| **Consumers** | HA (via MQTT Discovery), any flow needing current conditions |
+| **Retained** | Yes |
+
+```json
+{
+  "timestamp": "2026-04-02T14:22:00Z",
+  "wind_lull": 0.0,
+  "wind_avg": 2.9,
+  "wind_gust": 4.1,
+  "wind_direction": 245,
+  "pressure": 29.97,
+  "temperature": 41.3,
+  "humidity": 98.48,
+  "uv_index": 0.08,
+  "solar_radiation": 27,
+  "rain_accumulated": 0.012,
+  "precipitation_type": "None",
+  "lightning_distance": null,
+  "lightning_count": 0,
+  "battery": 2.668,
+  "report_interval": 1,
+  "source": "tempest",
+  "serial_number": "ST-00022280"
+}
+```
+
+`precipitation_type` values: `"None"` | `"Rain"` | `"Hail"` | `"Rain+Hail"`
+
+`lightning_distance` is `null` when no lightning detected within the observation window, otherwise distance in miles.
+
+All units: temperature °F, wind mph, pressure inHg, rain inches, distance miles.
+
+---
+
+#### Event Topics (Not Retained)
+
+**`highland/event/weather/station/observation`**
+
+Fires on every successfully processed `obs_st` message. Consumers subscribe to this event and read `highland/state/weather/station` on receipt rather than polling the state topic.
+
+| | |
+|--|--|
+| **Publisher** | Utility: Weather Station |
+| **Consumers** | Any flow reacting to weather changes |
+| **Retained** | No |
+
+```json
+{
+  "timestamp": "2026-04-02T14:22:00Z",
+  "serial_number": "ST-00022280",
+  "source": "tempest"
+}
+```
+
+---
+
+**`highland/event/weather/station/precipitation_start`**
+
+Fires immediately when the Tempest optical sensor detects rain onset (`evt_precip`). More responsive than waiting for the next `obs_st`.
+
+| | |
+|--|--|
+| **Publisher** | Utility: Weather Station |
+| **Consumers** | Notification flows, automation flows |
+| **Retained** | No |
+
+```json
+{
+  "timestamp": "2026-04-02T14:22:00Z",
+  "serial_number": "ST-00022280",
+  "source": "tempest"
+}
+```
+
+---
+
+**`highland/event/weather/station/lightning`**
+
+Fires on every lightning strike detected by the Tempest hardware (`evt_strike`).
+
+| | |
+|--|--|
+| **Publisher** | Utility: Weather Station |
+| **Consumers** | Notification flows, automation flows |
+| **Retained** | No |
+
+```json
+{
+  "timestamp": "2026-04-02T14:22:00Z",
+  "distance_miles": 4.2,
+  "energy": 12500,
+  "serial_number": "ST-00022280",
+  "source": "tempest"
+}
+```
+
+---
+
+#### Home Assistant Discovery
+
+Published by `Utility: Weather Station` on startup (retained). All entities group under the `Highland Weather Station` device (`highland_weather_station`). State topic for all sensors: `highland/state/weather/station`.
+
+| Entity | `unique_id` | `device_class` | Unit | `state_class` |
+|--------|------------|---------------|------|---------------|
+| Temperature | `highland_station_temperature` | `temperature` | °F | `measurement` |
+| Humidity | `highland_station_humidity` | `humidity` | % | `measurement` |
+| Pressure | `highland_station_pressure` | `atmospheric_pressure` | inHg | `measurement` |
+| Wind Speed | `highland_station_wind_avg` | — | mph | `measurement` |
+| Wind Gust | `highland_station_wind_gust` | — | mph | `measurement` |
+| Wind Lull | `highland_station_wind_lull` | — | mph | `measurement` |
+| Wind Direction | `highland_station_wind_direction` | — | ° | `measurement` |
+| UV Index | `highland_station_uv_index` | — | — | `measurement` |
+| Solar Radiation | `highland_station_solar_radiation` | `irradiance` | W/m² | `measurement` |
+| Rain Accumulated | `highland_station_rain_accumulated` | `precipitation` | in | `total_increasing` |
+| Precipitation Type | `highland_station_precipitation_type` | — | — | — |
+| Lightning Distance | `highland_station_lightning_distance` | `distance` | mi | — |
+| Lightning Count | `highland_station_lightning_count` | — | — | `total_increasing` |
+| Battery | `highland_station_battery` | `voltage` | V | `measurement` (diagnostic) |
+
+---
+
+#### Infrastructure
+
+**socat relay** (`highland-tempest-relay.service` on Workflow host)
+
+Receives Tempest UDP broadcast on port 50222 and unicasts to `127.0.0.1:50223`. Required because Docker bridge networking does not forward broadcast traffic to containers.
+
+```
+socat UDP-RECV:50222,reuseaddr UDP-SENDTO:127.0.0.1:50223
+```
+
+Node-RED docker-compose maps `50223/udp` into the container. The `Utility: Weather Station` UDP In node listens on port 50223.
+
+---
+
 #### Event Topics (Not Retained)
 
 **`highland/event/weather/precipitation_start`**
@@ -1044,6 +1202,7 @@ HA audit payload (last backup older than 26 hours):
 | `highland/state/driveway/#` | Both bin states |
 | `highland/state/garage/#` | All garage state |
 | `highland/state/appliance/#` | All appliance cycle state |
+| `highland/event/weather/station/#` | All weather station events |
 | `highland/event/weather/radar/#` | All radar events |
 | `highland/event/weather/radar/+/rendered` | Any product rendered |
 | `highland/event/weather/radar/+/error` | Any product error |
@@ -1079,4 +1238,4 @@ HA audit payload (last backup older than 26 hours):
 
 ---
 
-*Last Updated: 2026-04-01*
+*Last Updated: 2026-04-02*
