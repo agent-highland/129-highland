@@ -39,7 +39,12 @@ Schedex coordinates pulled from `config.secrets.location` (lat/lon). All 7 days 
 
 **Fixed Events** — Midnight inject (cron `00 00 * * *`) → `Prepare Fixed` function → MQTT out. General-purpose events intended for broad consumption by any interested flow.
 
-**System Events** — CronPlus node(s) for deterministic task triggers with limited consumers. Currently: `Backup Daily` fires at 3:15 AM (`0 15 3 * * *`) → `Prepare Backup Event` function → MQTT out `highland/event/scheduler/backup_daily`. Uses `node-red-contrib-cron-plus` (6-field cron: second minute hour day month weekday). Sets `node.status()` on each fire for editor visibility.
+**System Events** — CronPlus nodes for deterministic task triggers with limited consumers. Uses `node-red-contrib-cron-plus` (6-field cron: second minute hour day month weekday). Each node wires to a `Prepare Event` function → MQTT out. Sets `node.status()` on each fire for editor visibility.
+
+| Task | Expression | Topic | QoS |
+|------|-----------|-------|-----|
+| `Backup Daily` | `0 15 3 * * *` (3:15 AM daily) | `highland/event/scheduler/backup_daily` | 2 |
+| `Registry Refresh` | `0 0,15,30,45 * * * *` (every 15 min at :00/:15/:30/:45) | `highland/command/config/reload/device_registry` | 1 |
 
 **Sinks** — On Startup inject → `Recover Last State` function → Dynamic Period `link call`
 
@@ -109,4 +114,4 @@ This is a push model, not polling. The retained state delivers once on subscript
 
 ---
 
-*Last Updated: 2026-03-27*
+*Last Updated: 2026-04-03*

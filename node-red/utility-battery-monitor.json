@@ -384,7 +384,7 @@
         ],
         "x": 54,
         "y": 39,
-        "w": 772,
+        "w": 792,
         "h": 82
     },
     {
@@ -423,7 +423,7 @@
             "e8ba544f97467871"
         ],
         "x": 54,
-        "y": 519,
+        "y": 699,
         "w": 352,
         "h": 82
     },
@@ -442,9 +442,27 @@
             "5e689f60e3173dea"
         ],
         "x": 54,
-        "y": 399,
-        "w": 812,
+        "y": 579,
+        "w": 832,
         "h": 82
+    },
+    {
+        "id": "731ea6843a053e3a",
+        "type": "group",
+        "z": "utility-battery-monitor",
+        "name": "Device Reconciliation",
+        "style": {
+            "label": true
+        },
+        "nodes": [
+            "acd121328fc6393b",
+            "256a8b565c18c328",
+            "7517de51b06a3a98"
+        ],
+        "x": 54,
+        "y": 399,
+        "w": 512,
+        "h": 142
     },
     {
         "id": "f20fca0481590162",
@@ -481,7 +499,7 @@
                 "type": "str"
             }
         ],
-        "x": 310,
+        "x": 330,
         "y": 80,
         "wires": [
             [
@@ -503,7 +521,7 @@
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 500,
+        "x": 520,
         "y": 80,
         "wires": [
             [
@@ -517,7 +535,7 @@
         "z": "utility-battery-monitor",
         "g": "cd8683aad2292cc3",
         "name": "Evaluate State",
-        "func": "const { deviceKey, device, batteryLevel } = msg;\nconst thresholds = global.get('config')?.thresholds?.battery\n    || { warning: 35, critical: 15 };\n\n// Determine new state\nconst newState = batteryLevel < thresholds.critical ? 'critical'\n    : batteryLevel < thresholds.warning ? 'low'\n    : 'normal';\n\n// Load persisted battery states\nconst batteryStates = flow.get('battery_states') || {};\nconst previous = batteryStates[deviceKey] || { state: 'normal', level: null };\nconst previousState = previous.state;\n\n// Always update level\nbatteryStates[deviceKey] = {\n    state: newState,\n    level: batteryLevel,\n    last_reported: new Date().toISOString(),\n    last_notified_critical: previous.last_notified_critical || null\n};\nflow.set('battery_states', batteryStates);\n\n// No state change — nothing to do\nif (newState === previousState) {\n    return [null, msg];\n}\n\n// State changed — pass forward with transition info\nmsg.newState = newState;\nmsg.previousState = previousState;\n\nconst formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\nnode.status({\n    fill: newState === 'critical' ? 'red' : newState === 'low' ? 'yellow' : 'green',\n    shape: newState === 'critical' ? 'ring' : 'dot',\n    text: formatStatus(`${device.friendly_name}: ${batteryLevel}% (${newState})`)\n});\n\nreturn [msg, null];",
+        "func": "const formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\n\nconst { deviceKey, device, batteryLevel } = msg;\nconst thresholds = global.get('config')?.thresholds?.battery\n    || { warning: 35, critical: 15 };\n\n// Determine new state\nconst newState = batteryLevel < thresholds.critical ? 'critical'\n    : batteryLevel < thresholds.warning ? 'low'\n    : 'normal';\n\n// Load persisted battery states\nconst batteryStates = flow.get('battery_states') || {};\nconst previous = batteryStates[deviceKey] || { state: 'normal', level: null };\nconst previousState = previous.state;\n\n// Always update level\nbatteryStates[deviceKey] = {\n    state: newState,\n    level: batteryLevel,\n    last_reported: new Date().toISOString(),\n    last_notified_critical: previous.last_notified_critical || null\n};\nflow.set('battery_states', batteryStates);\n\n// No state change — nothing to do\nif (newState === previousState) {\n\n    node.status({\n        fill: 'grey',\n        shape: 'dot',\n        text: formatStatus(`${device.friendly_name} UNCHANGED`)\n    });\n\n    return [null, msg];\n}\n\n// State changed — pass forward with transition info\nmsg.newState = newState;\nmsg.previousState = previousState;\n\nnode.status({\n    fill: newState === 'critical' ? 'red' : newState === 'low' ? 'yellow' : 'green',\n    shape: newState === 'critical' ? 'ring' : 'dot',\n    text: formatStatus(`${device.friendly_name}: ${batteryLevel}% (${newState})`)\n});\n\nreturn [msg, null];",
         "outputs": 2,
         "timeout": 0,
         "noerr": 0,
@@ -656,7 +674,7 @@
         "payload": "",
         "payloadType": "date",
         "x": 170,
-        "y": 440,
+        "y": 620,
         "wires": [
             [
                 "5e689f60e3173dea"
@@ -668,16 +686,16 @@
         "type": "function",
         "z": "utility-battery-monitor",
         "g": "41b79a15fa8cf0ab",
-        "name": "Recover Critical State",
-        "func": "const batteryStates = flow.get('battery_states') || {};\nconst notifications = global.get('config')?.notifications;\nconst adminOnly = notifications?.defaults?.admin_only || ['joseph'];\nconst targets = adminOnly.map(p => `people.${p}.ha_companion`);\nconst registry = global.get('config.device_catalog') || {};\n\nconst now = Date.now();\nconst twentyFourHours = 24 * 60 * 60 * 1000;\nconst timers = {};\n\nfor (const [deviceKey, deviceState] of Object.entries(batteryStates)) {\n    if (deviceState.state !== 'critical') continue;\n\n    const deviceRegistry = global.get('config.device_registry') || {};\n    const device = deviceRegistry.devices?.[deviceKey];\n\n    if (!device) continue;\n\n    const lastNotified = deviceState.last_notified_critical\n        ? new Date(deviceState.last_notified_critical).getTime()\n        : 0;\n    const elapsed = now - lastNotified;\n    const remaining = twentyFourHours - elapsed;\n\n    const notifyAndReschedule = () => {\n        const states = flow.get('battery_states') || {};\n        if (states[deviceKey]?.state !== 'critical') return;\n        node.send({\n            payload: JSON.stringify({\n                timestamp: new Date().toISOString(),\n                targets,\n                severity: 'high',\n                title: `Battery Critical: ${device.friendly_name}`,\n                message: `${device.friendly_name} battery is ${states[deviceKey].level}% — needs replacement (${device.battery?.quantity}× ${device.battery?.type})`,\n                group: 'battery_alerts'\n            }),\n            topic: 'highland/event/notify'\n        });\n        states[deviceKey].last_notified_critical = new Date().toISOString();\n        flow.set('battery_states', states);\n    };\n\n    if (remaining <= 0) {\n        // Overdue — notify immediately then set fresh 24hr timer\n        notifyAndReschedule();\n        timers[deviceKey] = setTimeout(notifyAndReschedule, twentyFourHours);\n    } else {\n        // Not yet due — resume from where we left off\n        timers[deviceKey] = setTimeout(notifyAndReschedule, remaining);\n    }\n}\n\nflow.set('battery_timers', timers, 'volatile');\n\nconst formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\nconst count = Object.keys(timers).length;\nnode.status({\n    fill: count > 0 ? 'yellow' : 'green',\n    shape: count > 0 ? 'ring' : 'dot',\n    text: formatStatus(`${count} critical timer(s) recovered`)\n});\n\nnode.send({\n    topic: 'highland/state/battery/states',\n    payload: JSON.stringify({\n        timestamp: new Date().toISOString(),\n        source: 'battery_monitor',\n        states: batteryStates\n    }),\n    retain: true,\n    qos: 1\n});\n\nreturn null;",
+        "name": "Resume Critical Timers",
+        "func": "const batteryStates = flow.get('battery_states') || {};\nconst notifications = global.get('config')?.notifications;\nconst adminOnly = notifications?.defaults?.admin_only || ['joseph'];\nconst targets = adminOnly.map(p => `people.${p}.ha_companion`);\nconst registry = global.get('config.device_catalog') || {};\n\nconst now = Date.now();\nconst twentyFourHours = 24 * 60 * 60 * 1000;\nconst timers = {};\n\nfor (const [deviceKey, deviceState] of Object.entries(batteryStates)) {\n    if (deviceState.state !== 'critical') continue;\n\n    const deviceRegistry = global.get('config.device_registry') || {};\n    const device = deviceRegistry.devices?.[deviceKey];\n\n    if (!device) continue;\n\n    const lastNotified = deviceState.last_notified_critical\n        ? new Date(deviceState.last_notified_critical).getTime()\n        : 0;\n    const elapsed = now - lastNotified;\n    const remaining = twentyFourHours - elapsed;\n\n    const notifyAndReschedule = () => {\n        const states = flow.get('battery_states') || {};\n        if (states[deviceKey]?.state !== 'critical') return;\n        node.send({\n            payload: JSON.stringify({\n                timestamp: new Date().toISOString(),\n                targets,\n                severity: 'high',\n                title: `Battery Critical: ${device.friendly_name}`,\n                message: `${device.friendly_name} battery is ${states[deviceKey].level}% — needs replacement (${device.battery?.quantity}× ${device.battery?.type})`,\n                group: 'battery_alerts'\n            }),\n            topic: 'highland/event/notify'\n        });\n        states[deviceKey].last_notified_critical = new Date().toISOString();\n        flow.set('battery_states', states);\n    };\n\n    if (remaining <= 0) {\n        // Overdue — notify immediately then set fresh 24hr timer\n        notifyAndReschedule();\n        timers[deviceKey] = setTimeout(notifyAndReschedule, twentyFourHours);\n    } else {\n        // Not yet due — resume from where we left off\n        timers[deviceKey] = setTimeout(notifyAndReschedule, remaining);\n    }\n}\n\nflow.set('battery_timers', timers, 'volatile');\n\nconst formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\nconst count = Object.keys(timers).length;\nnode.status({\n    fill: count > 0 ? 'yellow' : 'green',\n    shape: count > 0 ? 'ring' : 'dot',\n    text: formatStatus(`${count > 0 ? count + ' RECOVERED' : 'STABLE'}`)\n});\n\nnode.send({\n    topic: 'highland/state/battery/states',\n    payload: JSON.stringify({\n        timestamp: new Date().toISOString(),\n        source: 'battery_monitor',\n        states: batteryStates\n    }),\n    retain: true,\n    qos: 1\n});\n\nreturn null;",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 560,
-        "y": 440,
+        "x": 570,
+        "y": 620,
         "wires": [
             [
                 "4679e39ca3668870"
@@ -693,7 +711,7 @@
         "scope": null,
         "uncaught": false,
         "x": 140,
-        "y": 560,
+        "y": 740,
         "wires": [
             [
                 "e8ba544f97467871"
@@ -715,7 +733,7 @@
         "statusVal": "",
         "statusType": "auto",
         "x": 310,
-        "y": 560,
+        "y": 740,
         "wires": []
     },
     {
@@ -733,8 +751,8 @@
         "correl": "",
         "expiry": "",
         "broker": "4cefa2ad2d8b462e",
-        "x": 780,
-        "y": 440,
+        "x": 800,
+        "y": 620,
         "wires": []
     },
     {
@@ -747,7 +765,7 @@
         "links": [
             "e84fe68765ca4fea"
         ],
-        "x": 720,
+        "x": 740,
         "y": 80,
         "wires": [],
         "l": true
@@ -766,7 +784,7 @@
             }
         ],
         "x": 350,
-        "y": 440,
+        "y": 620,
         "wires": [
             [
                 "4f2cbefb326ebf6f"
@@ -811,6 +829,67 @@
         "wires": [
             [
                 "d05550e9207dfe65"
+            ]
+        ]
+    },
+    {
+        "id": "acd121328fc6393b",
+        "type": "mqtt in",
+        "z": "utility-battery-monitor",
+        "g": "731ea6843a053e3a",
+        "name": "Configuration Loaded",
+        "topic": "highland/status/config/loaded",
+        "qos": "1",
+        "datatype": "auto-detect",
+        "broker": "4cefa2ad2d8b462e",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 180,
+        "y": 440,
+        "wires": [
+            [
+                "256a8b565c18c328"
+            ]
+        ]
+    },
+    {
+        "id": "256a8b565c18c328",
+        "type": "function",
+        "z": "utility-battery-monitor",
+        "g": "731ea6843a053e3a",
+        "name": "Remove Stale Devices",
+        "func": "const deviceRegistry = global.get('config.device_registry') || {};\nconst knownDevices = deviceRegistry.devices || {};\n\nconst batteryStates = flow.get('battery_states') || {};\nconst timers = flow.get('battery_timers', 'volatile') || {};\n\nconst pruned = [];\n\nfor (const deviceKey of Object.keys(batteryStates)) {\n    if (knownDevices[deviceKey]) continue;\n\n    // Cancel active critical timer if present\n    if (timers[deviceKey]) {\n        clearTimeout(timers[deviceKey]);\n        delete timers[deviceKey];\n    }\n\n    delete batteryStates[deviceKey];\n    pruned.push(deviceKey);\n}\n\nif (pruned.length > 0) {\n    flow.set('battery_states', batteryStates);\n    flow.set('battery_timers', timers, 'volatile');\n    node.warn(`Pruned ${pruned.length} stale battery state(s): ${pruned.join(', ')}`);\n}\n\nconst formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\n\nnode.status({\n    fill: pruned.length > 0 ? 'yellow' : 'green',\n    shape: 'dot',\n    text: formatStatus(pruned.length > 0 ? `PRUNED ${pruned.length}` : 'IN SYNC')\n});\n\nreturn null;",
+        "outputs": 0,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 440,
+        "y": 440,
+        "wires": []
+    },
+    {
+        "id": "7517de51b06a3a98",
+        "type": "mqtt in",
+        "z": "utility-battery-monitor",
+        "g": "731ea6843a053e3a",
+        "name": "Registry Reloaded",
+        "topic": "highland/command/config/reload/device_registry",
+        "qos": "1",
+        "datatype": "auto-detect",
+        "broker": "4cefa2ad2d8b462e",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 190,
+        "y": 500,
+        "wires": [
+            [
+                "256a8b565c18c328"
             ]
         ]
     },

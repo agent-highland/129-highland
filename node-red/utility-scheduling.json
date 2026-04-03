@@ -73,7 +73,7 @@
             "c72a0598e7a13849"
         ],
         "x": 54,
-        "y": 739,
+        "y": 799,
         "w": 512,
         "h": 262
     },
@@ -88,12 +88,15 @@
         "nodes": [
             "sc-sys01",
             "sc-sys02",
-            "sc-sys03"
+            "sc-sys03",
+            "4937bcae11356478",
+            "2a1d4c1055010bd9",
+            "c340314de0ed4363"
         ],
         "x": 54,
         "y": 619,
-        "w": 732,
-        "h": 82
+        "w": 652,
+        "h": 142
     },
     {
         "id": "7060212203baa6cc",
@@ -447,7 +450,7 @@
         "payload": "daytime",
         "payloadType": "str",
         "x": 180,
-        "y": 780,
+        "y": 840,
         "wires": [
             [
                 "90122e4abff75c56"
@@ -477,7 +480,7 @@
         "payload": "evening",
         "payloadType": "str",
         "x": 180,
-        "y": 840,
+        "y": 900,
         "wires": [
             [
                 "c545ce79c5b3f818"
@@ -507,7 +510,7 @@
         "payload": "overnight",
         "payloadType": "str",
         "x": 180,
-        "y": 900,
+        "y": 960,
         "wires": [
             [
                 "907d1a7e900923ab"
@@ -537,7 +540,7 @@
         "payload": "",
         "payloadType": "date",
         "x": 180,
-        "y": 960,
+        "y": 1020,
         "wires": [
             [
                 "c72a0598e7a13849"
@@ -555,7 +558,7 @@
             "2b9c1e7ead51e0c1"
         ],
         "x": 430,
-        "y": 780,
+        "y": 840,
         "wires": [],
         "l": true
     },
@@ -570,7 +573,7 @@
             "2b9c1e7ead51e0c1"
         ],
         "x": 430,
-        "y": 840,
+        "y": 900,
         "wires": [],
         "l": true
     },
@@ -585,7 +588,7 @@
             "2b9c1e7ead51e0c1"
         ],
         "x": 430,
-        "y": 900,
+        "y": 960,
         "wires": [],
         "l": true
     },
@@ -618,7 +621,7 @@
             "82f4afa33feca9d9"
         ],
         "x": 400,
-        "y": 960,
+        "y": 1020,
         "wires": [],
         "l": true
     },
@@ -713,7 +716,7 @@
         "type": "function",
         "z": "utility-scheduling",
         "g": "sc-g-sysevents",
-        "name": "Prepare Backup Event",
+        "name": "Prepare Event",
         "func": "node.status({ fill: 'green', shape: 'dot', text: `fired ${new Date().toLocaleTimeString()}` });\n\nmsg.payload = {\n    timestamp: new Date().toISOString(),\n    source: \"scheduler\",\n    task: \"backup_daily\"\n};\nmsg.topic = \"highland/event/scheduler/backup_daily\";\nreturn msg;",
         "outputs": 1,
         "timeout": 0,
@@ -721,7 +724,7 @@
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 400,
+        "x": 380,
         "y": 660,
         "wires": [
             [
@@ -734,9 +737,9 @@
         "type": "mqtt out",
         "z": "utility-scheduling",
         "g": "sc-g-sysevents",
-        "name": "Publish Backup Event",
+        "name": "Publish",
         "topic": "highland/event/scheduler/backup_daily",
-        "qos": "0",
+        "qos": "2",
         "retain": "false",
         "respTopic": "",
         "contentType": "",
@@ -744,8 +747,83 @@
         "correl": "",
         "expiry": "",
         "broker": "4cefa2ad2d8b462e",
-        "x": 660,
+        "x": 580,
         "y": 660,
+        "wires": []
+    },
+    {
+        "id": "4937bcae11356478",
+        "type": "cronplus",
+        "z": "utility-scheduling",
+        "g": "sc-g-sysevents",
+        "name": "Registry Refresh",
+        "outputField": "payload",
+        "timeZone": "",
+        "storeName": "",
+        "commandResponseMsgOutput": "output1",
+        "defaultLocation": "",
+        "defaultLocationType": "default",
+        "outputs": 1,
+        "options": [
+            {
+                "name": "registry_refresh",
+                "topic": "registry_refresh",
+                "payloadType": "default",
+                "payload": "",
+                "expressionType": "cron",
+                "expression": "0 0,15,30,45 * * * *",
+                "location": "",
+                "offset": "0",
+                "solarType": "all",
+                "solarEvents": "sunrise,sunset"
+            }
+        ],
+        "x": 190,
+        "y": 720,
+        "wires": [
+            [
+                "2a1d4c1055010bd9"
+            ]
+        ]
+    },
+    {
+        "id": "2a1d4c1055010bd9",
+        "type": "function",
+        "z": "utility-scheduling",
+        "g": "sc-g-sysevents",
+        "name": "Prepare Event",
+        "func": "msg.payload = {\n    timestamp: new Date().toISOString(),\n    source: 'scheduler',\n    task: 'registry_refresh'\n};\nmsg.topic = 'highland/command/config/reload/device_registry';\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 420,
+        "y": 720,
+        "wires": [
+            [
+                "c340314de0ed4363"
+            ]
+        ]
+    },
+    {
+        "id": "c340314de0ed4363",
+        "type": "mqtt out",
+        "z": "utility-scheduling",
+        "g": "sc-g-sysevents",
+        "name": "Publish",
+        "topic": "highland/command/config/reload/device_registry",
+        "qos": "1",
+        "retain": "false",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "4cefa2ad2d8b462e",
+        "x": 620,
+        "y": 720,
         "wires": []
     },
     {
@@ -780,7 +858,7 @@
         "sessionExpiry": ""
     },
     {
-        "id": "52143b148dabf91e",
+        "id": "8aa00efce1a5d2a0",
         "type": "global-config",
         "env": [],
         "modules": {
