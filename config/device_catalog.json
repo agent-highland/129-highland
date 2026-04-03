@@ -5,14 +5,9 @@
     },
     "PS-S04D": {
       "battery": { "type": "CR2450", "quantity": 2 }
-    }
-  },
-  "overrides": {
-    "kitchen_dishwasher_vibration": {
-      "friendly_name": "Dishwasher Vibration"
     },
-    "office_desk_presence": {
-      "friendly_name": "Joseph's Desk Presence"
+    "SNZB-02P": {
+      "battery": { "type": "CR2477", "quantity": 1 }
     }
   }
 }

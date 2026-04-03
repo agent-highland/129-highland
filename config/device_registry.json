@@ -2,7 +2,7 @@
   "devices": {
     "office_desk_presence": {
       "ha_device_id": "b1f32de2ab0e6d26c7b3654b4bebb0f2",
-      "friendly_name": "office_desk_presence",
+      "friendly_name": "Office Desk Presence",
       "manufacturer": "Aqara",
       "model": "Presence sensor FP300",
       "model_id": "PS-S04D",
@@ -11,16 +11,49 @@
       "protocol": "zigbee",
       "battery_pct_entity": "sensor.office_desk_presence_battery"
     },
-    "kitchen_diswasher_vibration": {
+    "kitchen_dishwasher_vibration": {
       "ha_device_id": "fa91d003c7934fce2c4e11b5a9b6b3f3",
-      "friendly_name": "kitchen_diswasher_vibration",
+      "friendly_name": "Kitchen Dishwasher Vibration",
       "manufacturer": "Aqara",
       "model": "Vibration sensor",
       "model_id": "DJT11LM",
       "area_id": "kitchen",
       "floor_id": "first_floor",
       "protocol": "zigbee",
-      "battery_pct_entity": "sensor.kitchen_diswasher_vibration_battery"
+      "battery_pct_entity": "sensor.kitchen_dishwasher_vibration_battery"
+    },
+    "dining_room_environment": {
+      "ha_device_id": "dad1ab912ad0831de0725eb71bfceff8",
+      "friendly_name": "Dining Room Environment",
+      "manufacturer": "SONOFF",
+      "model": "Temperature and humidity sensor",
+      "model_id": "SNZB-02P",
+      "area_id": "dining_room",
+      "floor_id": "first_floor",
+      "protocol": "zigbee",
+      "battery_pct_entity": "sensor.dining_room_environment_battery"
+    },
+    "kitchen_environment": {
+      "ha_device_id": "f40a560c1a2592d2c79b60d945dc761f",
+      "friendly_name": "Kitchen Environment",
+      "manufacturer": "SONOFF",
+      "model": "Temperature and humidity sensor",
+      "model_id": "SNZB-02P",
+      "area_id": "kitchen",
+      "floor_id": "first_floor",
+      "protocol": "zigbee",
+      "battery_pct_entity": "sensor.kitchen_environment_battery"
+    },
+    "kitchen_dishwasher": {
+      "ha_device_id": "34167fd285d4bd6de489b225b057eea6",
+      "friendly_name": "Kitchen Dishwasher",
+      "manufacturer": "Zooz",
+      "model": "ZEN15",
+      "model_id": null,
+      "area_id": "kitchen",
+      "floor_id": "first_floor",
+      "protocol": "zwave",
+      "battery_pct_entity": null
     }
   },
   "areas": {
@@ -133,29 +166,9 @@
       "floor_id": "second_floor"
     }
   },
-  "models": {
-    "DJT11LM": {
-      "battery": {
-        "type": "CR2032",
-        "quantity": 1
-      }
-    },
-    "PS-S04D": {
-      "battery": {
-        "type": "CR2450",
-        "quantity": 2
-      }
-    },
-    "SNZB-02P": {
-      "battery": {
-        "type": "CR2477",
-        "quantity": 1
-      }
-    }
-  },
   "meta": {
-    "last_refreshed": "2026-04-01T13:44:57.074Z",
-    "device_count": 2,
+    "last_refreshed": "2026-04-03T10:27:09.245Z",
+    "device_count": 5,
     "source": "ha_registry"
   }
 }

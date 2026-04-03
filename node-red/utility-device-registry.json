@@ -237,11 +237,6 @@
             "df4d35dab5afc630",
             "75fc52f54190d568",
             "2d782853df4a0824",
-            "5ad91d23a357e074",
-            "2826b08e526e8b58",
-            "286b75baad702851",
-            "eaa42e77a1cc9145",
-            "6989f94f068ae2f4",
             "5777bdfb5a3c3761"
         ],
         "x": 54,
@@ -373,7 +368,7 @@
         "y": 100,
         "wires": [
             [
-                "6989f94f068ae2f4"
+                "7cd3401c7b5ddfb1"
             ]
         ],
         "l": true
@@ -529,7 +524,7 @@
         ],
         "linkType": "static",
         "timeout": "30",
-        "x": 660,
+        "x": 400,
         "y": 100,
         "wires": [
             [
@@ -543,14 +538,14 @@
         "z": "utility-device-registry",
         "g": "dc5aa602fab26888",
         "name": "Assemble Results",
-        "func": "// Preserve existing models from loaded config — never overwrite\nconst existingModels = msg.existingModels || {};\n\n// Build areas map\nconst areasMap = {};\nfor (const area of msg.registry.areas) {\n    areasMap[area.area_id] = {\n        name: area.name,\n        floor_id: area.floor_id\n    };\n}\n\n// Build entity index by device_id for fast lookup\nconst entitiesByDevice = {};\nfor (const entity of msg.registry.entities) {\n    if (!entitiesByDevice[entity.device_id]) {\n        entitiesByDevice[entity.device_id] = [];\n    }\n    entitiesByDevice[entity.device_id].push(entity);\n}\n\n// Filter and build devices\nconst devices = {};\nfor (const device of msg.registry.devices) {\n    // Skip infrastructure: service entries and devices with no parent\n    if (device.entry_type !== null) continue;\n    if (!device.via_device_id) continue;\n\n    // Determine protocol from identifiers\n    const identifierPlatforms = device.identifiers.map(i => i[0]);\n    let protocol = null;\n    if (identifierPlatforms.some(p => p === 'mqtt')) protocol = 'zigbee';\n    else if (identifierPlatforms.some(p => p === 'zwave_js')) protocol = 'zwave';\n    else continue; // skip non-highland devices\n\n    // Find battery entity\n    const deviceEntities = entitiesByDevice[device.id] || [];\n    const batteryEntity = deviceEntities.find(\n        e => e.original_name === 'Battery' && e.disabled_by === null\n    );\n\n    // Resolve area\n    const area = device.area_id ? areasMap[device.area_id] : null;\n\n    const key = device.name;\n    const friendlyName = device.name_by_user || device.name;\n\n    devices[key] = {\n        ha_device_id: device.id,\n        friendly_name: friendlyName,\n        manufacturer: device.manufacturer,\n        model: device.model,\n        model_id: device.model_id,\n        area_id: device.area_id,\n        floor_id: area?.floor_id || null,\n        protocol,\n        battery_pct_entity: batteryEntity?.entity_id || null\n    };\n}\n\nmsg.payload = {\n    devices,\n    areas: areasMap,\n    models: existingModels,\n    meta: {\n        last_refreshed: new Date().toISOString(),\n        device_count: Object.keys(devices).length,\n        source: 'ha_registry'\n    }\n};\n\nconst formatStatus = global.get('utils.formatStatus', 'initializers');\nnode.status({ fill: 'green', shape: 'dot', \n    text: formatStatus(`Built — ${Object.keys(devices).length} devices`) });\n\nreturn msg;",
+        "func": "// Build areas map\nconst areasMap = {};\nfor (const area of msg.registry.areas) {\n    areasMap[area.area_id] = {\n        name: area.name,\n        floor_id: area.floor_id\n    };\n}\n\n// Build entity index by device_id for fast lookup\nconst entitiesByDevice = {};\nfor (const entity of msg.registry.entities) {\n    if (!entitiesByDevice[entity.device_id]) {\n        entitiesByDevice[entity.device_id] = [];\n    }\n    entitiesByDevice[entity.device_id].push(entity);\n}\n\n// Filter and build devices\nconst devices = {};\nfor (const device of msg.registry.devices) {\n    // Skip infrastructure: service entries and devices with no parent\n    if (device.entry_type !== null) continue;\n    if (!device.via_device_id) continue;\n\n    // Determine protocol from identifiers\n    const identifierPlatforms = device.identifiers.map(i => i[0]);\n    let protocol = null;\n    if (identifierPlatforms.some(p => p === 'mqtt')) protocol = 'zigbee';\n    else if (identifierPlatforms.some(p => p === 'zwave_js')) protocol = 'zwave';\n    else continue; // skip non-highland devices\n\n    // Find battery entity\n    const deviceEntities = entitiesByDevice[device.id] || [];\n    const batteryEntity = deviceEntities.find(\n        e => e.original_name === 'Battery' && e.disabled_by === null\n    );\n\n    // Resolve area\n    const area = device.area_id ? areasMap[device.area_id] : null;\n\n    const key = device.name;\n    const friendlyName = device.name_by_user || device.name;\n\n    devices[key] = {\n        ha_device_id: device.id,\n        friendly_name: friendlyName,\n        manufacturer: device.manufacturer,\n        model: device.model,\n        model_id: device.model_id,\n        area_id: device.area_id,\n        floor_id: area?.floor_id || null,\n        protocol,\n        battery_pct_entity: batteryEntity?.entity_id || null\n    };\n}\n\nmsg.payload = {\n    devices,\n    areas: areasMap,\n    meta: {\n        last_refreshed: new Date().toISOString(),\n        device_count: Object.keys(devices).length,\n        source: 'ha_registry'\n    }\n};\n\nconst formatStatus = global.get('utils.formatStatus', 'initializers');\nnode.status({ fill: 'green', shape: 'dot', \n    text: formatStatus(`Built — ${Object.keys(devices).length} devices`) });\n\nreturn msg;",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 930,
+        "x": 670,
         "y": 100,
         "wires": [
             [
@@ -605,7 +600,7 @@
         "links": [
             "99a7741d25dd7808"
         ],
-        "x": 1130,
+        "x": 870,
         "y": 100,
         "wires": [],
         "l": true
@@ -620,7 +615,7 @@
         "links": [
             "f7498b1f1de55933"
         ],
-        "x": 1140,
+        "x": 880,
         "y": 160,
         "wires": [],
         "l": true
@@ -723,7 +718,7 @@
         "z": "utility-device-registry",
         "g": "dc5aa602fab26888",
         "name": "Update Context",
-        "func": "global.set('config.deviceRegistry', msg.payload);\n\nconst formatStatus = global.get('utils.formatStatus', 'initializers');\nnode.status({ fill: 'green', shape: 'dot',\n    text: formatStatus(`${msg.payload.meta.device_count} devices`) });\n    \nreturn msg;",
+        "func": "global.set('config.device_registry', msg.payload);\n\nconst formatStatus = global.get('utils.formatStatus', 'initializers');\nnode.status({ fill: 'green', shape: 'dot',\n    text: formatStatus(`${msg.payload.meta.device_count} devices`) });\n    \nreturn msg;",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,
@@ -775,95 +770,6 @@
         "wires": [
             [
                 "75fc52f54190d568"
-            ]
-        ]
-    },
-    {
-        "id": "5ad91d23a357e074",
-        "type": "link in",
-        "z": "utility-device-registry",
-        "g": "dc5aa602fab26888",
-        "name": "Fetch From Filesystem",
-        "links": [],
-        "x": 200,
-        "y": 160,
-        "wires": [
-            [
-                "286b75baad702851"
-            ]
-        ],
-        "l": true
-    },
-    {
-        "id": "2826b08e526e8b58",
-        "type": "link out",
-        "z": "utility-device-registry",
-        "g": "dc5aa602fab26888",
-        "name": "Load Extant Registry Return",
-        "mode": "return",
-        "links": [],
-        "x": 795,
-        "y": 160,
-        "wires": []
-    },
-    {
-        "id": "286b75baad702851",
-        "type": "file in",
-        "z": "utility-device-registry",
-        "g": "dc5aa602fab26888",
-        "name": "From Disk",
-        "filename": "/config/device_registry.json",
-        "filenameType": "str",
-        "format": "utf8",
-        "chunk": false,
-        "sendError": false,
-        "encoding": "utf8",
-        "allProps": false,
-        "x": 430,
-        "y": 160,
-        "wires": [
-            [
-                "eaa42e77a1cc9145"
-            ]
-        ]
-    },
-    {
-        "id": "eaa42e77a1cc9145",
-        "type": "function",
-        "z": "utility-device-registry",
-        "g": "dc5aa602fab26888",
-        "name": "Extract Models",
-        "func": "try {\n    const existing = JSON.parse(msg.payload);\n    msg.existingModels = existing.models || {};\n} catch (e) {\n    // File doesn't exist yet or is malformed — start with empty models\n    msg.existingModels = {};\n}\nreturn msg;",
-        "outputs": 1,
-        "timeout": 0,
-        "noerr": 0,
-        "initialize": "",
-        "finalize": "",
-        "libs": [],
-        "x": 640,
-        "y": 160,
-        "wires": [
-            [
-                "2826b08e526e8b58"
-            ]
-        ]
-    },
-    {
-        "id": "6989f94f068ae2f4",
-        "type": "link call",
-        "z": "utility-device-registry",
-        "g": "dc5aa602fab26888",
-        "name": "",
-        "links": [
-            "5ad91d23a357e074"
-        ],
-        "linkType": "static",
-        "timeout": "30",
-        "x": 380,
-        "y": 100,
-        "wires": [
-            [
-                "7cd3401c7b5ddfb1"
             ]
         ]
     },
@@ -993,7 +899,7 @@
         "sessionExpiry": ""
     },
     {
-        "id": "d0c07fc33e51c04e",
+        "id": "9f6035c1e196a993",
         "type": "global-config",
         "env": [],
         "modules": {

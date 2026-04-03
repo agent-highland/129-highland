@@ -4,13 +4,13 @@
 
 ### Purpose
 
-Centralized knowledge about devices — protocol, topic structure, capabilities, and metadata. Populated automatically from Home Assistant's internal registries on startup and refresh. HA is the authoritative source for device identity, area assignment, and friendly names. Battery chemistry is the only data that must be manually maintained, stored in the `models` block keyed by model ID.
+Centralized knowledge about devices — protocol, topic structure, capabilities, and metadata. Populated automatically from Home Assistant's internal registries on startup and refresh. HA is the authoritative source for device identity, area assignment, and friendly names. The registry is fully generated — no manually curated data lives here. Model-level metadata (battery specs, reporting intervals) lives in `device_catalog.json`.
 
 ### Storage
 
 Stored as `/home/nodered/config/device_registry.json`, written by the `Utility: Device Registry` flow on every refresh. Loaded into global context at startup by Config Loader as an initial seed; the Device Registry flow then overwrites global context with a fresh HA pull shortly after.
 
-**Access:** `global.get('config.deviceRegistry')`
+**Access:** `global.get('config.device_registry')`
 
 > **Volume mount:** `/home/nodered/config` is mounted into the Node-RED container at `/config` **without** the `:ro` flag — the Device Registry flow writes back to this directory. The directory requires `chmod 775` on the host to allow container writes.
 
@@ -21,7 +21,7 @@ Stored as `/home/nodered/config/device_registry.json`, written by the `Utility: 
   "devices": {
     "office_desk_presence": {
       "ha_device_id": "b1f32de2ab0e6d26c7b3654b4bebb0f2",
-      "friendly_name": "office_desk_presence",
+      "friendly_name": "Office Desk Presence",
       "manufacturer": "Aqara",
       "model": "Presence sensor FP300",
       "model_id": "PS-S04D",
@@ -29,30 +29,14 @@ Stored as `/home/nodered/config/device_registry.json`, written by the `Utility: 
       "floor_id": "second_floor",
       "protocol": "zigbee",
       "battery_pct_entity": "sensor.office_desk_presence_battery"
-    },
-    "kitchen_diswasher_vibration": {
-      "ha_device_id": "fa91d003c7934fce2c4e11b5a9b6b3f3",
-      "friendly_name": "kitchen_diswasher_vibration",
-      "manufacturer": "Aqara",
-      "model": "Vibration sensor",
-      "model_id": "DJT11LM",
-      "area_id": "kitchen",
-      "floor_id": "first_floor",
-      "protocol": "zigbee",
-      "battery_pct_entity": "sensor.kitchen_diswasher_vibration_battery"
     }
   },
   "areas": {
-    "office": { "name": "Office", "floor_id": "second_floor" },
-    "kitchen": { "name": "Kitchen", "floor_id": "first_floor" }
-  },
-  "models": {
-    "PS-S04D": { "battery": { "type": "CR2450", "quantity": 2 } },
-    "DJT11LM": { "battery": { "type": "CR2032", "quantity": 1 } }
+    "office": { "name": "Office", "floor_id": "second_floor" }
   },
   "meta": {
     "last_refreshed": "2026-03-27T03:15:00.000Z",
-    "device_count": 2,
+    "device_count": 1,
     "source": "ha_registry"
   }
 }
@@ -72,14 +56,15 @@ Stored as `/home/nodered/config/device_registry.json`, written by the `Utility: 
 | `protocol` | Derived from HA identifiers | `zigbee` or `zwave` |
 | `battery_pct_entity` | HA entity registry | Entity ID for battery percentage sensor; `null` if mains-powered |
 
-**Battery lookup at runtime:**
+**Battery spec lookup at runtime** (via `device_catalog.json`, not the registry):
 ```javascript
-const device = global.get('config.deviceRegistry')?.devices?.['office_desk_presence'];
-const battery = global.get('config.deviceRegistry')?.models?.[device.model_id]?.battery;
+const device = global.get('config.device_registry')?.devices?.['office_desk_presence'];
+const catalog = global.get('config.device_catalog');
+const battery = catalog?.models?.[device.model_id]?.battery;
 // { type: "CR2450", quantity: 2 }
 ```
 
-Battery chemistry is never stored on the device entry — always looked up via `model_id` from the `models` block. This ensures a single point of truth: fixing a model spec fixes it for all devices of that model.
+Battery chemistry is never stored in `device_registry.json`. The `model_id` field is the bridge between the device registry and the device catalog.
 
 ### Population
 
@@ -93,7 +78,7 @@ The `Utility: Device Registry` flow builds the registry automatically by calling
 
 **Friendly name:** `name_by_user` wins if set in HA; otherwise falls back to `name` (which for Z2M devices is the Z2M friendly name — our device key convention).
 
-**Models preservation:** The `models` block is never overwritten by a refresh. On each run, `Assemble Results` reads the existing `models` from the file on disk before building the new registry, then carries it forward into the written output. Manual model entries survive refreshes.
+**No models block:** The registry no longer contains a `models` block. Battery specs and other model metadata live in `device_catalog.json` and are loaded separately by Config Loader into `global.config.deviceCatalog`.
 
 ### Utility: Device Registry Flow
 
@@ -117,15 +102,15 @@ The `Utility: Device Registry` flow builds the registry automatically by calling
 
 **Persist:** Serializes `msg.payload` to JSON and writes to `/config/device_registry.json`.
 
-**Publish:** Stores `msg.payload` in `global.config.deviceRegistry`. Publishes a status summary to `highland/status/config/loaded` (retained).
+**Publish:** Stores `msg.payload` in `global.config.device_registry`. Publishes a status summary to `highland/status/config/loaded` (retained).
 
 ### Maintenance
 
 **Adding a new device:** Pair it in Z2M or Z-Wave, assign it to an area in HA, then trigger a registry refresh (manual inject or `highland/command/config/reload/device_registry`). The device appears automatically.
 
-**Adding a new model's battery spec:** Edit `device_registry.json` directly on the host, add an entry to the `models` block, then reload. The next refresh will preserve your addition.
+**Adding a new model's battery spec:** Edit `device_catalog.json` in the repo and add an entry to the `models` block. Deploy the file to the Workflow host and reload config (`highland/command/config/reload/device_catalog`).
 
-**Device removal:** Remove from Z2M/Z-Wave, then refresh. The device will disappear from the `devices` block automatically since the registry is rebuilt from scratch on every refresh.
+**Device removal:** Remove from Z2M/Z-Wave, then refresh. The device will disappear from the `devices` block automatically.
 
 ---
 
@@ -149,7 +134,7 @@ Translate high-level commands ("turn on garage_carriage_left") into protocol-spe
 ```
 
 **Behavior:**
-1. Lookup entity in Device Registry (`global.config.deviceRegistry.devices`)
+1. Lookup entity in Device Registry (`global.config.device_registry.devices`)
 2. Validate action against capabilities (warn on unsupported — don't block)
 3. Format payload based on protocol + action
 4. Publish to appropriate topic
@@ -262,4 +247,4 @@ Notification: "Lockdown failed: Garage Door Lock did not respond"
 
 ---
 
-*Last Updated: 2026-03-27*
+*Last Updated: 2026-04-03*
