@@ -2,9 +2,7 @@
 
 ## Purpose & Scope
 
-This document covers the **attention layer** for the dishwasher — a state machine that runs above the power-based cycle detection documented in `subsystems/APPLIANCE_MONITORING.md`. Where cycle detection answers "is the dishwasher running?", the attention layer answers "does the dishwasher require action from a human?"
-
-The two layers are independent and cooperating. The attention state machine subscribes to events published by the cycle detection flow; it does not duplicate or replace any of that logic.
+This document covers the **attention layer** for the dishwasher — two cooperating state machines that run above the power-based cycle detection documented in `subsystems/APPLIANCE_MONITORING.md`. Where cycle detection answers "is the dishwasher running?", the attention layer answers "what state are the dishes in, and does the dishwasher require human action?"
 
 ---
 
@@ -12,183 +10,195 @@ The two layers are independent and cooperating. The attention state machine subs
 
 ### Explicit intent over inference
 
-The central design principle of this system is that **human confirmation is the primary signal**, not sensor inference. Door sensors, tilt sensors, and timing heuristics can observe *behavior* but cannot reliably determine *intent*. The gap between the two is where edge cases live, and there are always more edge cases than anticipated.
+Human confirmation via button press is the primary signal. Sensors observe behavior but cannot reliably determine intent. The door being fully open is a necessary precondition for unloading — the bottom rack physically requires the door fully flat to extend — but it is not a sufficient indicator. Loading dirty dishes, unloading clean ones, and opening the door out of curiosity are all physically identical from the sensor's perspective. The button eliminates that ambiguity entirely.
 
-This is particularly true for the dishwasher, where legitimate interactions with the door include:
+Sensor data drives notifications and the guest heuristic fallback. It does not drive the primary state transition.
 
-- Venting steam post-cycle (door cracked, not unloading)
-- Grabbing a single item (door fully open, but not unloading)
-- Partial unloading over multiple sessions
-- Loading dirty dishes throughout the day
-- Checking whether the cycle finished
-- Guests interacting with it differently than the household norm
+### Two cooperating state machines
 
-Rather than building increasingly elaborate heuristics to discriminate between these cases, the system **defaults to explicit confirmation** and uses sensor data as a supporting signal for notifications and fallback detection only.
+The attention layer is modeled as two independent state machines that share a single handoff signal:
 
-### The button is the hero action
+- **Content state** — what is the condition of the items in the dishwasher? Simple two-state machine. `DIRTY` is the default resting state. `CLEAN` persists until unloading is confirmed, at which point content transitions back to `DIRTY`.
+- **Attention state** — is human interaction required, and what is the nature of the current interaction? Four states covering the range from "nothing needed" through "someone is actively engaged" to "likely done but unconfirmed."
 
-A dedicated physical button (Aqara WXKG13LM, Zigbee) serves as the primary confirmation mechanism. Pressing it means "I have unloaded the dishwasher." This is:
+The handoff: when attention state reaches `NONE`, content state transitions from `CLEAN` to `DIRTY`. The content machine is entirely passive — it just watches for that signal.
 
-- Unambiguous — no inference required
-- Low-friction — single press, natural gesture immediately after unloading
-- Idempotent — pressing it when already in `IDLE_DIRTY` is a safe no-op
-- Consistent — the same button pattern applies to the washing machine and dryer, establishing a household habit
+### All inputs gated by operational state
 
-Sensor data (tilt angle, timing) informs the system and drives notifications. It does **not** drive the primary state transition in the common case.
-
-### The tilt sensor's actual role
-
-A contact sensor cannot distinguish a door cracked 10° to vent steam from a door dropped fully open. A tilt sensor provides continuous angle data, enabling that discrimination structurally. However, even with full angle visibility, the tilt sensor **cannot** discriminate between unloading and any other full-open interaction. A full door open is a *necessary precondition* for unloading (the bottom rack physically requires the door fully flat to extend) but is not a *sufficient* indicator that unloading occurred. The close-after-open sequence adds no information.
-
-**The tilt sensor's role is therefore:**
-- Suppress "door opened" notifications when the door is only in the vent-angle range (< ~15°)
-- Feed the guest heuristic: sustained full open beyond the duration threshold → `LIKELY_EMPTY`
-- Trigger first-open notification when door reaches unload angle, first time after cycle completion
-
-It does not drive any state transition in the primary user workflow.
+The attention state machine only accepts inputs when the operational state (from cycle detection) is `IDLE`. When the dishwasher is `RUNNING`, all inputs — button presses, tilt events, timers — are silently discarded. A button press during a cycle is not an error; it is irrelevant.
 
 ---
 
 ## Hardware
 
+### ZEN15 Power Switch
+
+**Z2M device name:** `kitchen_dishwasher`
+
+Power monitoring switch, connected inline between the outlet and the dishwasher. Owned entirely by cycle detection — see `subsystems/APPLIANCE_MONITORING.md`. The attention layer consumes its events but does not interact with it directly.
+
 ### Tilt Sensor — Aqara DJT11LM (Zigbee)
 
-Mounted on the dishwasher door. Reports 3-axis angle data and vibration events via Zigbee2MQTT. Reports on change, not on a fixed interval — every message is a meaningful signal.
+**Z2M device name:** `kitchen_dishwasher_vibration`
 
-**Calibration required at install:** Mount the sensor, open the door to various positions, record the axis readings from Z2M. Document the results as config values. One-time 5-minute exercise.
+Mounted on the side of the dishwasher door near the top. Reports angle data via Zigbee2MQTT on change — every message is a meaningful signal, silence means the door is stationary.
 
-**Angle ranges (illustrative — update after calibration):**
+> **Naming note:** Z2M classifies the DJT11LM as a vibration sensor — its primary marketed capability. The Z2M device name and topic path therefore use `vibration`. We are using it exclusively for tilt/angle measurement.
 
-| Range | Interpretation |
-|-------|----------------|
-| 0° – ~15° | Closed or minimally cracked. Venting territory. Suppress notifications. |
-| ~15° – ~45° | Partially open. Ambiguous. |
-| ~45°+ | Substantially open. Unload-candidate range. Guest heuristic timer starts. |
+**Relevant field:** `angle_x` — the axis that tracks door angle given the current mounting orientation.
 
-**Sensitivity setting:** Medium or low via Z2M. The dishwasher motor running and nearby appliances should not generate spurious angle reports.
+**Calibrated angle ranges:**
 
-**Reporting behavior:** Reports on change. While the door is in motion, reports arrive. When the door stops, reports stop. Last received angle is the resting position. Silence means stillness.
+| Range | Zone | Interpretation |
+|-------|------|----------------|
+| `angle_x` > -5 | Closed / vent | Door is closed (latched ~5, soft-closed ~4) or cracked slightly for venting (~1). No meaningful distinction between latched and unlatched — both are "closed" for our purposes. |
+| -5 ≥ `angle_x` > -80 | Middle | Partially open. Ambiguous intent. Silent — no state transitions, no notifications. |
+| `angle_x` ≤ -80 | Unload | Door is fully open (~-83 at mechanical stop). The only position from which the bottom rack can be extended. |
 
-### Manual Button — Aqara WXKG13LM (Zigbee)
+**Sensitivity setting:** Medium or low via Z2M. Dishwasher motor vibration and nearby appliances should not generate spurious angle reports.
 
-Surface or wall mounted in a convenient location relative to the dishwasher. Specific mounting location TBD — counter underside and adjacent cabinetry present physical constraints; further evaluation needed.
+### Manual Button — SONOFF SNZB-01P (Zigbee)
 
-**Button action mapping (Z2M exposes single, double, hold):**
+**Z2M device name:** `kitchen_dishwasher_button`
+
+**Button action mapping (Z2M exposes single, double, long):**
 
 | Action | Meaning |
 |--------|---------|
 | Single press | "I have unloaded the dishwasher" — primary action |
 | Double press | Reserved |
-| Hold | Reserved |
+| Long press | Reserved |
+
+Mounting location TBD — counter underside and adjacent cabinetry present physical constraints due to drawer clearance. Evaluate adjacent cabinet side panel or other location that survives daily use without accidental activation.
 
 **Acknowledgment:** Brief HA notification ("Dishwasher marked as empty") confirms the press registered. Voice acknowledgment deferred until voice pipeline is integrated.
 
-**Idempotency:** Button press in `IDLE_DIRTY` is a safe no-op. No state change, no error, no notification.
-
-**Note:** The WXKG13LM is the logical choice for the washing machine and dryer as well. Same hardware, same single-press gesture, same philosophy.
+**Idempotency:** Button press when attention is already `NONE` (and operational state is `IDLE`) is a safe no-op.
 
 ---
 
-## State Machine
+## Content State Machine
+
+Simple two-state machine. Passive — only transitions in response to the attention state machine reaching `NONE`.
 
 ### States
 
 | State | Meaning |
 |-------|---------|
-| `IDLE_DIRTY` | Dishwasher contains dirty dishes or is empty and ready to load. No action required. |
-| `RUNNING` | Cycle in progress. No attention required yet. |
-| `CLEAN_UNATTENDED` | Cycle complete. Dishes are clean. Human action (unloading) has not been confirmed. |
-| `LIKELY_EMPTY` | Guest heuristic: sustained full-open after cycle suggests unloading occurred. Awaiting confirmation or timeout. |
+| `DIRTY` | Default resting state. Contains dirty dishes or is empty and ready to load. No attention needed. |
+| `CLEAN` | A wash cycle has completed. Dishes are clean. Persists until unloading confirmed. |
 
 ### Transitions
 
 ```
-IDLE_DIRTY
-  ──(cycle_started event)───────────────────────────────► RUNNING
+DIRTY ──(cycle_finished event)──────────────────────────► CLEAN
+CLEAN ──(attention state → NONE)────────────────────────► DIRTY
+```
 
-RUNNING
-  ──(cycle_finished event)──────────────────────────────► CLEAN_UNATTENDED
+`CLEAN` is sticky. It does not change based on door activity, presence, or time elapsed. Only `NONE` in the attention state machine resets it.
 
-CLEAN_UNATTENDED
-  ──(button: single press)──────────────────────────────► IDLE_DIRTY
-  ──(voice: "dishwasher is empty") [future]─────────────► IDLE_DIRTY
-  ──(tilt: door at unload angle ≥ guest threshold)──────► LIKELY_EMPTY
-  ──(tilt: door enters unload angle, first time)─────────  [notification only, no transition]
-  ──(tilt: door in vent range only)──────────────────────  [notification suppressed, no transition]
-  ──(N hours elapsed, no action)─────────────────────────  [nag notification, no transition]
+---
+
+## Attention State Machine
+
+### States
+
+| State | Meaning |
+|-------|---------|
+| `NONE` | No attention required. Either content is `DIRTY`, machine is `RUNNING`, or unloading has been confirmed. |
+| `UNATTENDED` | Content is `CLEAN`, machine is `IDLE`, no human interaction yet confirmed. |
+| `VENTING` | Content is `CLEAN`, door is in the vent zone. Human is aware; steam venting in progress. |
+| `LIKELY_EMPTY` | Guest heuristic fired — door was at full unload depth for an extended continuous duration. Awaiting confirmation or timeout. |
+
+### Transitions
+
+All inputs silently discarded when operational state is `RUNNING`.
+
+```
+NONE
+  ──(cycle_finished)────────────────────────────────────► UNATTENDED
+
+UNATTENDED
+  ──(button: single press)──────────────────────────────► NONE
+  ──(angle_x settles in vent zone, > -5)────────────────► VENTING
+  ──(angle_x ≤ -80, sustained ≥ guest_duration_s)───────► LIKELY_EMPTY
+
+VENTING
+  ──(door returns to closed zone, angle_x > -5)─────────► UNATTENDED
+  ──(venting_timeout_s elapsed, door still in vent zone)► UNATTENDED
+  ──(button: single press)──────────────────────────────► NONE
 
 LIKELY_EMPTY
-  ──(button: single press)──────────────────────────────► IDLE_DIRTY
-  ──(voice: "dishwasher is empty") [future]─────────────► IDLE_DIRTY
-  ──(M hours elapsed, no confirmation)──────────────────► IDLE_DIRTY  [self-resolve timeout]
-
-IDLE_DIRTY
-  ──(button: single press)──────────────────────────────►  no-op
-  ──(tilt: any door activity)────────────────────────────  [no state change — loading dirty dishes]
+  ──(button: single press)──────────────────────────────► NONE
+  ──(likely_empty_timeout_h elapsed)────────────────────► NONE
 ```
 
 ### Transition Logic Detail
 
-**`CLEAN_UNATTENDED` → `IDLE_DIRTY` (primary path)**
+**`UNATTENDED` → `VENTING`**
 
-Trigger: button single press or voice command (future).
+Trigger: `angle_x` settles above -5 (vent zone) after having been lower. The door was opened slightly and stopped. This is the steam venting gesture — intentional, conscious, a human deliberately cracking the door. We enter `VENTING` and start a timeout.
 
-The button is the authoritative signal. The tilt sensor cannot discriminate between "I opened the door and unloaded" and "I opened the door and changed my mind." A full door open is a *necessary precondition* for unloading — the bottom rack physically requires the door fully flat to extend — but it is not a *sufficient* indicator. The close-after-open sequence therefore adds no information.
+**`VENTING` → `UNATTENDED`**
 
-**`CLEAN_UNATTENDED` → `LIKELY_EMPTY` (guest / fallback path)**
+Two paths:
+1. Door returns to closed zone — human closed the door without proceeding to unload. Back to `UNATTENDED`, with contextual notification.
+2. `venting_timeout_s` elapses while door is still in vent zone — human opened the door and walked away without closing it. Same destination, same contextual notification.
 
-Trigger: door at unload-angle (≥ ~45°) for a continuous duration ≥ `guest_open_duration_s` (configurable, default 360s / 6 min).
+In both cases the notification acknowledges prior interaction: "You vented the dishwasher — don't forget to unload it." Subsequent nags reference the venting event rather than treating the situation as if no interaction occurred.
 
-Catches the scenario where a guest unloads the dishwasher without pressing the button. Extended continuous full-open is the only passive signal available and is reasonably discriminating — a genuine unload keeps the door down for several minutes, whereas grabbing one item or venting steam does not.
+**`UNATTENDED` → `LIKELY_EMPTY`**
 
-Cumulative open time is **not** used. Multiple short opens do not sum. A single continuous open of sufficient duration is required.
+Trigger: `angle_x` ≤ -80 (unload zone) continuously for ≥ `guest_duration_s`. A genuine unload by someone unfamiliar with the system (guest) keeps the door fully down for several minutes. Grabbing one item does not. Cumulative open time is **not** used — a single continuous open of sufficient duration is required.
 
-**`LIKELY_EMPTY` self-resolve timeout**
+The middle zone (-5 to -80) is silent — no transition, no notification, no timer. Partial opens are ignored entirely.
 
-If `LIKELY_EMPTY` receives no confirmation for `likely_empty_timeout_hours` (default 2h), it transitions to `IDLE_DIRTY` automatically. The heuristic fired with reasonable confidence; the timeout avoids the system staying stuck indefinitely.
+**`LIKELY_EMPTY` → `NONE` (timeout)**
 
-**Button press in `IDLE_DIRTY`**
+If `LIKELY_EMPTY` receives no button confirmation for `likely_empty_timeout_h`, it transitions to `NONE` automatically. The heuristic fired with reasonable confidence; the timeout prevents the system from waiting indefinitely.
 
-No-op. No state change, no notification, no error. Idempotent by design.
+**Button press gating**
+
+Button is valid in `UNATTENDED`, `VENTING`, and `LIKELY_EMPTY` — anywhere a human might be confirming they have unloaded. Button is a no-op in `NONE`. Button is discarded entirely when operational state is `RUNNING`.
 
 ---
 
 ## Notification Strategy
 
-Notifications are informational. They do not change state.
+Notifications are driven by state transitions and elapsed time. The state machine publishes events; the notification flow consumes them and decides whether to fire based on configuration.
 
-| Trigger | Message | Notes |
-|---------|---------|-------|
-| Enter `CLEAN_UNATTENDED` | "Dishwasher finished — dishes are clean." | Always |
-| Door enters unload angle, first time in `CLEAN_UNATTENDED` | "Reminder — dishes are clean." | First open only |
-| Door in vent range only | [suppressed] | Not a meaningful interaction |
-| `nag_first_hours` elapsed in `CLEAN_UNATTENDED`, door never opened | "Dishwasher has been done for N hours." | Configurable |
-| `nag_first_hours` elapsed in `CLEAN_UNATTENDED`, door opened but not confirmed | "Dishwasher still waiting to be unloaded." | Configurable |
-| Enter `LIKELY_EMPTY` | "Looks like the dishwasher was emptied — press the button to confirm." | Always |
-| Button press in `CLEAN_UNATTENDED` or `LIKELY_EMPTY` | "Dishwasher marked as empty." | Always |
-| `LIKELY_EMPTY` self-resolve | "Dishwasher marked as empty (auto-confirmed)." | Configurable — may be too chatty |
+| Trigger | Message | DnD |
+|---------|---------|-----|
+| `NONE` → `UNATTENDED` (cycle finished) | "Dishwasher finished — dishes are clean." | Respect |
+| `UNATTENDED` nag, no prior interaction | "Dishwasher has been done for N hours." | Override after `nag_dnd_override_h` |
+| `VENTING` → `UNATTENDED` | "You vented the dishwasher — don't forget to unload it." | Respect |
+| `UNATTENDED` nag, post-venting | "You vented the dishwasher N minutes ago — dishes are still waiting." | Override after `nag_dnd_override_h` |
+| `UNATTENDED` → `LIKELY_EMPTY` | "Looks like the dishwasher was emptied — press the button to confirm." | Respect |
+| Button press → `NONE` | "Dishwasher marked as empty." | Respect |
 
-**DnD behavior:** Cycle completion notification and first-open reminder respect DnD. Nag notifications after `nag_dnd_override_hours` override DnD — their value is specifically in surfacing a forgotten task.
+Nag notifications are time-based events, not state transitions — they fire while sitting in `UNATTENDED` at configured intervals. They are canceled by any state transition out of `UNATTENDED`. Post-venting nags are distinct in character from cold nags and reference the prior venting interaction.
+
+The door reaching the unload zone (`angle_x` ≤ -80) does **not** generate a notification. A human standing at a fully-open dishwasher is already aware the dishes are clean.
 
 ---
 
-## Integration Points
+## MQTT Topics
 
-### Upstream: Cycle Detection
+### State Topics (Retained)
 
-The attention state machine subscribes to:
-- `highland/event/appliance/dishwasher/cycle_finished` → trigger `RUNNING → CLEAN_UNATTENDED`
-- `highland/event/appliance/dishwasher/cycle_started` → trigger to `RUNNING` (resets attention state if somehow mid-cycle)
+**`highland/state/appliance/dishwasher/content`** ← RETAINED
 
-### Tilt Sensor (Z2M → MQTT)
+```json
+{
+  "timestamp": "2026-04-03T10:00:00Z",
+  "source": "dishwasher_attention",
+  "state": "CLEAN"
+}
+```
 
-Z2M publishes the DJT11LM's axis data to its device topic. A normalization function in Node-RED translates raw axis readings into a single `door_angle_deg` value using the calibration mapping. The normalized value is what the state machine consumes. Raw Z2M data is not published to the `highland/` bus.
+`state` values: `DIRTY` | `CLEAN`
 
-### Button (Z2M → MQTT)
-
-Z2M publishes WXKG13LM press actions to its device topic. A handler maps `single` press to the attention state machine's confirm-empty input.
-
-### MQTT Topics
+---
 
 **`highland/state/appliance/dishwasher/attention`** ← RETAINED
 
@@ -196,108 +206,135 @@ Z2M publishes WXKG13LM press actions to its device topic. A handler maps `single
 {
   "timestamp": "2026-04-03T10:00:00Z",
   "source": "dishwasher_attention",
-  "state": "CLEAN_UNATTENDED",
+  "state": "UNATTENDED",
   "cycle_finished_at": "2026-04-03T09:30:00Z",
   "last_door_event_at": "2026-04-03T09:45:00Z",
-  "last_door_angle": 12.3
+  "last_angle_x": -2.1
 }
 ```
 
-`state` values: `IDLE_DIRTY` | `RUNNING` | `CLEAN_UNATTENDED` | `LIKELY_EMPTY`
+`state` values: `NONE` | `UNATTENDED` | `VENTING` | `LIKELY_EMPTY`
+
+---
+
+### Event Topics (Not Retained)
 
 **`highland/event/appliance/dishwasher/attention_changed`**
+
+Published on every attention state transition.
 
 ```json
 {
   "timestamp": "2026-04-03T10:00:00Z",
   "source": "dishwasher_attention",
-  "previous_state": "CLEAN_UNATTENDED",
-  "new_state": "IDLE_DIRTY",
+  "previous_state": "UNATTENDED",
+  "new_state": "NONE",
   "trigger": "button"
 }
 ```
 
-`trigger` values: `button` | `voice` | `tilt_guest_heuristic` | `timeout` | `cycle_started` | `cycle_finished`
+`trigger` values: `cycle_finished` | `button` | `voice` | `vent_closed` | `vent_timeout` | `guest_heuristic` | `likely_empty_timeout`
 
-### HA Entities (via MQTT Discovery)
+---
 
-| Entity | Type | Notes |
-|--------|------|-------|
-| Dishwasher Attention State | `sensor` | `state` field |
-| Dishwasher Needs Attention | `binary_sensor` | `ON` when state is `CLEAN_UNATTENDED` or `LIKELY_EMPTY` |
+**`highland/event/appliance/dishwasher/content_changed`**
+
+Published when content state transitions.
+
+```json
+{
+  "timestamp": "2026-04-03T10:00:00Z",
+  "source": "dishwasher_attention",
+  "previous_state": "CLEAN",
+  "new_state": "DIRTY",
+  "trigger": "attention_none"
+}
+```
+
+---
+
+## Home Assistant Discovery
+
+Published by `Area: Kitchen` flow on startup (retained, idempotent). Content state exposed as a plain sensor under a new logical device separate from the Z2M-managed `kitchen_dishwasher` device.
+
+**Device:** `highland_dishwasher_attention`
+
+| Entity | Type | State Topic | Value Template | Notes |
+|--------|------|------------|----------------|-------|
+| Dishwasher Content | `sensor` | `highland/state/appliance/dishwasher/content` | `{{ value_json.state }}` | `DIRTY` or `CLEAN` |
+| Dishwasher Attention | `sensor` | `highland/state/appliance/dishwasher/attention` | `{{ value_json.state }}` | Optional — richer dashboard detail |
+
+The content sensor is the primary dashboard entity. The attention sensor is optional but useful for showing the nuanced interaction state.
 
 ---
 
 ## Node-RED Flow Architecture
 
-Separate flow from the cycle detection flow. Tab name: `Appliance: Dishwasher Attention` (or grouped under a broader appliance tab).
+Tab: `Area: Kitchen`
 
 ```
-[MQTT In: cycle_finished / cycle_started]
+[MQTT In: cycle events]
         │
         ▼
-[Function: Attention State Machine]
+[Function: Attention State Machine]  ← single Function node, all state in flow context
         │
+        ├──► [MQTT Out: highland/state/appliance/dishwasher/content]     retained
         ├──► [MQTT Out: highland/state/appliance/dishwasher/attention]   retained
         ├──► [MQTT Out: highland/event/appliance/dishwasher/attention_changed]
+        ├──► [MQTT Out: highland/event/appliance/dishwasher/content_changed]
         └──► [Function: Notification Builder]
                     │
                     ▼
              [MQTT Out: highland/event/notify]
 
-[MQTT In: Z2M tilt sensor topic]
+[MQTT In: zigbee2mqtt/kitchen_dishwasher_vibration]
         │
         ▼
-[Function: Tilt Normalizer]    ← applies calibration mapping → door_angle_deg
+[Function: Tilt Handler]   ← extracts angle_x, gates on operational state
         │
         ▼
 [Link Out → Attention State Machine]
 
-[MQTT In: Z2M button topic]
+[MQTT In: zigbee2mqtt/kitchen_dishwasher_button]
         │
         ▼
-[Function: Button Handler]     ← filters for single press
+[Function: Button Handler]  ← filters single press, gates on operational state
         │
         ▼
 [Link Out → Attention State Machine]
 
 [Inject: nag timer]
+[Inject: venting timeout]
         │
         ▼
 [Link Out → Attention State Machine]
 ```
 
-The attention state machine is a single Function node with state in flow context, consistent with the pattern in `APPLIANCE_MONITORING.md`.
-
 ---
 
 ## Configuration Parameters
 
-Stored in flow context `config`, set by Config Loader on startup.
-
 | Parameter | Default | Notes |
 |-----------|---------|-------|
-| `unload_angle_threshold_deg` | 45 | Door angle above which we consider door "fully open." Calibrate at install. |
-| `vent_angle_threshold_deg` | 15 | Door angle below which we consider door "cracked/venting." Calibrate at install. |
-| `guest_open_duration_s` | 360 | Continuous open at unload angle to trigger `LIKELY_EMPTY` (6 min) |
-| `nag_first_hours` | 4 | Hours in `CLEAN_UNATTENDED` before first nag |
-| `nag_repeat_hours` | 2 | Hours between subsequent nag notifications |
-| `nag_dnd_override_hours` | 6 | Hours before nag overrides DnD |
-| `likely_empty_timeout_hours` | 2 | Hours before `LIKELY_EMPTY` self-resolves |
-| `notify_on_self_resolve` | false | Notification on `LIKELY_EMPTY` auto-timeout |
-| `tilt_axis` | TBD | Which axis from DJT11LM maps to door angle. Set at calibration. |
-| `tilt_closed_value` | TBD | Axis reading when door is closed. Set at calibration. |
-| `tilt_open_value` | TBD | Axis reading when door is fully open. Set at calibration. |
+| `vent_zone_threshold` | -5 | `angle_x` above this = vent/closed zone |
+| `unload_zone_threshold` | -80 | `angle_x` at or below this = unload zone |
+| `venting_timeout_s` | 900 | 15 min in vent zone before auto-return to `UNATTENDED` |
+| `guest_duration_s` | 360 | Continuous time in unload zone to trigger `LIKELY_EMPTY` (6 min) |
+| `likely_empty_timeout_h` | 2 | Hours before `LIKELY_EMPTY` self-resolves to `NONE` |
+| `nag_first_h` | 4 | Hours in `UNATTENDED` before first nag |
+| `nag_repeat_h` | 2 | Hours between subsequent nags |
+| `nag_dnd_override_h` | 6 | Hours before nag overrides DnD |
+| `notify_on_likely_empty_timeout` | false | Notification on auto-timeout resolution |
 
 ---
 
 ## Open Questions / Pending Actions
 
-- **Button mounting location** — Counter underside and cabinetry are constrained due to drawer clearance. Evaluate adjacent cabinet side panel or other location that survives daily use without accidental activation.
-- **Tilt sensor calibration** — Mount DJT11LM, record axis readings at closed / venting crack / fully open positions, update `tilt_axis`, `tilt_closed_value`, `tilt_open_value` in config.
-- **DJT11LM reporting behavior** — Verify whether it reports continuously during door travel or only on settling. Affects timer granularity in the state machine.
-- **Guest threshold tuning** — 6 minutes is a reasoned estimate. Review actual guest interactions in logs and adjust `guest_open_duration_s` accordingly.
-- **Voice integration** — "Marvin, dishwasher is empty" as additional path to `IDLE_DIRTY`. Deferred until voice pipeline is built. No state machine changes required when it arrives.
+- **Button mounting location** — TBD. Counter underside ruled out (drawer clearance). Adjacent cabinet side panel or similar to be evaluated.
+- **Venting timeout tuning** — 15 minutes is a starting estimate. Adjust after observing real venting behavior.
+- **Guest duration tuning** — 6 minutes is a reasoned estimate. Review guest interactions in logs and adjust.
+- **Voice integration** — "Marvin, dishwasher is empty" as additional path to `NONE`. Deferred until voice pipeline built. No state machine changes required — add a new input link to the existing Function node.
+- **MQTT_TOPICS.md** — update to reflect the two-topic model (`content` + `attention`) replacing the single `attention` topic.
 
 ---
 
@@ -305,4 +342,4 @@ Stored in flow context `config`, set by Config Loader on startup.
 
 | Date | Change |
 |------|--------|
-| 2026-04-03 | Initial commit. Dishwasher attention layer above cycle detection. Tilt sensor (DJT11LM) selected over contact sensor for vent-angle discrimination. Button (WXKG13LM) established as hero action / primary confirmation. Guest heuristic via continuous door-open duration retained as fallback. Close-after-open inference explicitly ruled out — full open is necessary but not sufficient for unloading. |
+| 2026-04-03 | Full redesign. Replaced single-state-machine approach with two cooperating state machines: content (`DIRTY`/`CLEAN`) and attention (`NONE`/`UNATTENDED`/`VENTING`/`LIKELY_EMPTY`). Introduced `VENTING` state to model steam venting gesture explicitly. Content state is sticky — only transitions on attention reaching `NONE`. All inputs gated by operational state. Tilt thresholds calibrated from live sensor: vent zone > -5, unload zone ≤ -80, silent middle zone. Hardware confirmed: ZEN15 (`kitchen_dishwasher`), SNZB-01P (`kitchen_dishwasher_button`), DJT11LM (`kitchen_dishwasher_vibration`). |

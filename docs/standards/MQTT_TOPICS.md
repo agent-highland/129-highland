@@ -930,23 +930,74 @@ See `subsystems/CALENDAR_INTEGRATION.md` for full payload schemas and consumer p
 
 **Architecture:** Per-appliance attention state machines that run above cycle detection. Answers "does this appliance require human action?" See `subsystems/DISHWASHER_ATTENTION.md` and `subsystems/WASHER_DRYER_ATTENTION.md`.
 
-**`highland/state/appliance/{appliance}/attention`** ← RETAINED
+**Dishwasher — content + attention model**
 
-`{appliance}` values: `washing_machine` | `dryer` | `dishwasher`
+**`highland/state/appliance/dishwasher/content`** ← RETAINED
 
-Dishwasher payload:
 ```json
 {
   "timestamp": "2026-04-03T10:00:00Z",
   "source": "dishwasher_attention",
-  "state": "CLEAN_UNATTENDED",
-  "cycle_finished_at": "2026-04-03T09:30:00Z",
-  "last_door_event_at": "2026-04-03T09:45:00Z",
-  "last_door_angle": 12.3
+  "state": "CLEAN"
 }
 ```
 
-Washer / dryer payload:
+`state` values: `DIRTY` | `CLEAN`
+
+---
+
+**`highland/state/appliance/dishwasher/attention`** ← RETAINED
+
+```json
+{
+  "timestamp": "2026-04-03T10:00:00Z",
+  "source": "dishwasher_attention",
+  "state": "UNATTENDED",
+  "cycle_finished_at": "2026-04-03T09:30:00Z",
+  "last_door_event_at": "2026-04-03T09:45:00Z",
+  "last_angle_x": -2.1
+}
+```
+
+`state` values: `NONE` | `UNATTENDED` | `VENTING` | `LIKELY_EMPTY`
+
+---
+
+**`highland/event/appliance/dishwasher/attention_changed`**
+
+```json
+{
+  "timestamp": "2026-04-03T10:00:00Z",
+  "source": "dishwasher_attention",
+  "previous_state": "UNATTENDED",
+  "new_state": "NONE",
+  "trigger": "button"
+}
+```
+
+`trigger` values: `cycle_finished` | `button` | `voice` | `vent_closed` | `vent_timeout` | `guest_heuristic` | `likely_empty_timeout`
+
+---
+
+**`highland/event/appliance/dishwasher/content_changed`**
+
+```json
+{
+  "timestamp": "2026-04-03T10:00:00Z",
+  "source": "dishwasher_attention",
+  "previous_state": "CLEAN",
+  "new_state": "DIRTY",
+  "trigger": "attention_none"
+}
+```
+
+---
+
+**Washer / dryer — attention model**
+
+**`highland/state/appliance/washing_machine/attention`** ← RETAINED
+**`highland/state/appliance/dryer/attention`** ← RETAINED
+
 ```json
 {
   "timestamp": "2026-04-03T10:00:00Z",
@@ -957,23 +1008,22 @@ Washer / dryer payload:
 }
 ```
 
-Dishwasher `state` values: `IDLE_DIRTY` | `RUNNING` | `CLEAN_UNATTENDED` | `LIKELY_EMPTY`
+`state` values: `IDLE` | `RUNNING` | `UNATTENDED` | `LIKELY_ATTENDED`
 
-Washer / dryer `state` values: `IDLE` | `RUNNING` | `UNATTENDED` | `LIKELY_ATTENDED`
-
-**`highland/event/appliance/{appliance}/attention_changed`**
+**`highland/event/appliance/washing_machine/attention_changed`**
+**`highland/event/appliance/dryer/attention_changed`**
 
 ```json
 {
   "timestamp": "2026-04-03T10:00:00Z",
-  "source": "dishwasher_attention",
-  "previous_state": "CLEAN_UNATTENDED",
-  "new_state": "IDLE_DIRTY",
+  "source": "washer_attention",
+  "previous_state": "UNATTENDED",
+  "new_state": "IDLE",
   "trigger": "button"
 }
 ```
 
-`trigger` values: `button` | `voice` | `tilt_guest_heuristic` | `presence_heuristic` | `timeout` | `cycle_started` | `cycle_finished`
+`trigger` values: `button` | `voice` | `presence_heuristic` | `timeout` | `cycle_started` | `cycle_finished`
 
 ---
 
@@ -1267,7 +1317,9 @@ HA audit payload (last backup older than 26 hours):
 | `highland/event/appliance/#` | All appliance cycle events |
 | `highland/event/appliance/+/cycle_finished` | Any machine finishing |
 | `highland/state/appliance/+/attention` | All appliance attention states |
+| `highland/state/appliance/dishwasher/content` | Dishwasher content state (DIRTY/CLEAN) |
 | `highland/event/appliance/+/attention_changed` | All appliance attention transitions |
+| `highland/event/appliance/dishwasher/content_changed` | Dishwasher content state transitions |
 | `highland/event/+/leak/#` | Any leak in any area |
 | `highland/event/+/motion_detected` | Any motion in any area |
 | `highland/status/#` | All health and heartbeat |
