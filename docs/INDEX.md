@@ -105,6 +105,7 @@ Domain-specific designs. Each subsystem is fully designed and ready for implemen
 | [`subsystems/LORA.md`](subsystems/LORA.md) | ✅ Designed | LoRaWAN gateway relay, bin monitoring state machine, mailbox delivery detection |
 | [`subsystems/VIDEO_PIPELINE.md`](subsystems/VIDEO_PIPELINE.md) | ✅ Designed | Three-stage analysis ladder, CPAI triage, Gemini analysis, zone filtering, cooldown/kill switch |
 | [`subsystems/WEATHER_FLOW.md`](subsystems/WEATHER_FLOW.md) | 🔄 Tier 1 + Radar + Station Live | NWS forecast + alerts live; radar pipeline live; Tempest station live; Tier 2 synthesis is target state |
+| [`subsystems/EUFY_LOCKS.md`](subsystems/EUFY_LOCKS.md) | 📋 Planned | eufy-bridge TypeScript service, MQTT integration for Eufy Wi-Fi locks, lock-only scope, secondary account strategy |
 | [`subsystems/ai/ASSIST_PIPELINE.md`](subsystems/ai/ASSIST_PIPELINE.md) | 📋 Planned | HA Assist voice pipeline, two-tier conversation agent, Echo Show experiment, satellite targeting |
 | [`subsystems/ai/PERSISTENT_MEMORY.md`](subsystems/ai/PERSISTENT_MEMORY.md) | ⏸ Blocked | AI memory architecture — blocked on hardware and HA pipeline event access |
 
@@ -170,4 +171,4 @@ New automation ideas → `AUTOMATION_BACKLOG.md`. Don't derail current work; cap
 
 ---
 
-*Last Updated: 2026-04-03*
+*Last Updated: 2026-04-07*
