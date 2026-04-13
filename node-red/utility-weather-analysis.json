@@ -16,10 +16,6 @@
             "label": true
         },
         "nodes": [
-            "8003ac69c8d35237",
-            "bdfa30e7a35512b9",
-            "23e2d270a0bfe6e8",
-            "07fc1f0dda9ef7f3",
             "96e978ef91a4f41e",
             "59c1611af669c0d0",
             "56495481d2c52143",
@@ -32,7 +28,7 @@
         "x": 54,
         "y": 1059,
         "w": 592,
-        "h": 322
+        "h": 202
     },
     {
         "id": "2b942717691a3747",
@@ -44,12 +40,11 @@
         },
         "nodes": [
             "3e6e7ace6608b2e8",
-            "47491515952ebb9d",
             "aed0dc355f209edb"
         ],
         "x": 54,
         "y": 819,
-        "w": 632,
+        "w": 432,
         "h": 82
     },
     {
@@ -265,27 +260,6 @@
         "y": 860,
         "wires": [
             [
-                "47491515952ebb9d"
-            ]
-        ]
-    },
-    {
-        "id": "47491515952ebb9d",
-        "type": "function",
-        "z": "utility-weather-analysis",
-        "g": "2b942717691a3747",
-        "name": "Rate Limiter",
-        "func": "let current_tick = flow.get('current_tick') || 1;\nlet gate_tick = flow.get('gate_tick') || 5;\n\ncurrent_tick++;\n\nif (current_tick > gate_tick) {\n    flow.set('current_tick', 1);\n    return msg;\n} else {\n    flow.set('current_tick', current_tick);\n    return null;\n}",
-        "outputs": 1,
-        "timeout": 0,
-        "noerr": 0,
-        "initialize": "",
-        "finalize": "",
-        "libs": [],
-        "x": 330,
-        "y": 860,
-        "wires": [
-            [
                 "aed0dc355f209edb"
             ]
         ]
@@ -296,9 +270,7 @@
         "z": "utility-weather-analysis",
         "g": "012af42498dc4e20",
         "name": "Aquire Current Forecast",
-        "links": [
-            "523101d843cab49c"
-        ],
+        "links": [],
         "x": 180,
         "y": 260,
         "wires": [
@@ -318,122 +290,10 @@
         "links": [
             "7d1f424943b9c604"
         ],
-        "x": 560,
+        "x": 360,
         "y": 860,
         "wires": [],
         "l": true
-    },
-    {
-        "id": "8003ac69c8d35237",
-        "type": "inject",
-        "z": "utility-weather-analysis",
-        "g": "013581a0b497e4ea",
-        "name": "Manual",
-        "props": [
-            {
-                "p": "payload"
-            },
-            {
-                "p": "topic",
-                "vt": "str"
-            }
-        ],
-        "repeat": "",
-        "crontab": "",
-        "once": false,
-        "onceDelay": 0.1,
-        "topic": "",
-        "payload": "",
-        "payloadType": "date",
-        "x": 150,
-        "y": 1100,
-        "wires": [
-            [
-                "23e2d270a0bfe6e8"
-            ]
-        ]
-    },
-    {
-        "id": "bdfa30e7a35512b9",
-        "type": "inject",
-        "z": "utility-weather-analysis",
-        "g": "013581a0b497e4ea",
-        "name": "Manual",
-        "props": [
-            {
-                "p": "payload"
-            },
-            {
-                "p": "topic",
-                "vt": "str"
-            }
-        ],
-        "repeat": "",
-        "crontab": "",
-        "once": false,
-        "onceDelay": 0.1,
-        "topic": "",
-        "payload": "",
-        "payloadType": "date",
-        "x": 150,
-        "y": 1160,
-        "wires": [
-            [
-                "07fc1f0dda9ef7f3"
-            ]
-        ]
-    },
-    {
-        "id": "23e2d270a0bfe6e8",
-        "type": "change",
-        "z": "utility-weather-analysis",
-        "g": "013581a0b497e4ea",
-        "name": "One Minute Polling",
-        "rules": [
-            {
-                "t": "set",
-                "p": "gate_tick",
-                "pt": "flow",
-                "to": "1",
-                "tot": "num"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 350,
-        "y": 1100,
-        "wires": [
-            []
-        ]
-    },
-    {
-        "id": "07fc1f0dda9ef7f3",
-        "type": "change",
-        "z": "utility-weather-analysis",
-        "g": "013581a0b497e4ea",
-        "name": "Five Minute Polling",
-        "rules": [
-            {
-                "t": "set",
-                "p": "gate_tick",
-                "pt": "flow",
-                "to": "5",
-                "tot": "num"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 350,
-        "y": 1160,
-        "wires": [
-            []
-        ]
     },
     {
         "id": "efaf0be553be4192",
@@ -492,7 +352,7 @@
         "payload": "",
         "payloadType": "date",
         "x": 150,
-        "y": 1220,
+        "y": 1100,
         "wires": [
             [
                 "0f61d9bb96867f60"
@@ -561,7 +421,7 @@
         "payload": "",
         "payloadType": "date",
         "x": 150,
-        "y": 1280,
+        "y": 1160,
         "wires": [
             [
                 "f21df83cbd2746d5"
@@ -591,7 +451,7 @@
         "payload": "",
         "payloadType": "date",
         "x": 150,
-        "y": 1340,
+        "y": 1220,
         "wires": [
             [
                 "cafa85c36fdde511"
@@ -612,7 +472,7 @@
         "finalize": "",
         "libs": [],
         "x": 330,
-        "y": 1280,
+        "y": 1160,
         "wires": [
             [
                 "f81f6598d2085d1c"
@@ -633,7 +493,7 @@
         "finalize": "",
         "libs": [],
         "x": 330,
-        "y": 1340,
+        "y": 1220,
         "wires": [
             [
                 "fedffdfcd28454f3"
@@ -651,7 +511,7 @@
             "255b2b0506704589"
         ],
         "x": 540,
-        "y": 1280,
+        "y": 1160,
         "wires": [],
         "l": true
     },
@@ -666,7 +526,7 @@
             "255b2b0506704589"
         ],
         "x": 540,
-        "y": 1340,
+        "y": 1220,
         "wires": [],
         "l": true
     },
@@ -990,7 +850,7 @@
             "7d1f424943b9c604"
         ],
         "x": 360,
-        "y": 1220,
+        "y": 1100,
         "wires": [],
         "l": true
     },
@@ -1026,7 +886,7 @@
         "sessionExpiry": ""
     },
     {
-        "id": "dc8e6034ac00281c",
+        "id": "d6771d119f00ad28",
         "type": "global-config",
         "env": [],
         "modules": {

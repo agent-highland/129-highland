@@ -1791,7 +1791,7 @@
         "z": "utility-notifications",
         "g": "un-receive-group",
         "name": "Resolve Notification ID",
-        "func": "const notifId = msg.payload.notification_id;\nif (!notifId) return msg;\n\nconst subscriptions = global.get('config')?.notifications?.subscriptions;\nif (!subscriptions) {\n    node.warn('notifications.subscriptions not found in global config');\n    return null;\n}\n\nconst sub = subscriptions[notifId];\nif (!sub) {\n    node.warn(`notification_id '${notifId}' not found in subscriptions — dropped`);\n    return null;\n}\n\nmsg.payload = {\n    ...msg.payload,\n    targets:  sub.targets,\n    severity: sub.severity\n};\ndelete msg.payload.notification_id;\n\nreturn msg;",
+        "func": "const notifId = msg.payload.notification_id;\nif (!notifId) return msg;\n\nconst subscriptions = global.get('config')?.notifications?.subscriptions;\nif (!subscriptions) {\n    node.warn('notifications.subscriptions not found in global config');\n    return null;\n}\n\nconst sub = subscriptions[notifId];\nif (!sub) {\n    node.warn(`notification_id '${notifId}' not found in subscriptions — dropped`);\n    return null;\n}\n\nmsg.payload = {\n    targets:  sub.targets,\n    severity: sub.severity,\n    ...msg.payload\n};\n\ndelete msg.payload.notification_id;\n\nreturn msg;",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,
@@ -1889,7 +1889,7 @@
         "enableGlobalContextStore": false
     },
     {
-        "id": "3d96f0ef73aafb32",
+        "id": "93cec41acccc3b0d",
         "type": "global-config",
         "env": [],
         "modules": {

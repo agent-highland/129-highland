@@ -46,6 +46,10 @@
       "targets": ["people.joseph.ha_companion", "areas.*.tv"],
       "severity": "low"
     },
+    "weather.alert": {
+      "targets": ["people.joseph.ha_companion"],
+      "severity": "low"
+    },
     "weather.precip_forecast": {
       "targets": ["people.joseph.ha_companion"],
       "severity": "low"
