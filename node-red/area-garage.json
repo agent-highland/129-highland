@@ -21,7 +21,7 @@
             "f0950e11ce175451"
         ],
         "x": 54,
-        "y": 279,
+        "y": 459,
         "w": 612,
         "h": 82
     },
@@ -40,7 +40,7 @@
             "d4c51757a7160e57"
         ],
         "x": 54,
-        "y": 159,
+        "y": 339,
         "w": 812,
         "h": 82
     },
@@ -59,7 +59,7 @@
             "6068e30e4b9d38c5"
         ],
         "x": 54,
-        "y": 39,
+        "y": 219,
         "w": 852,
         "h": 82
     },
@@ -76,9 +76,32 @@
             "c8baf2cec854dec2"
         ],
         "x": 54,
-        "y": 399,
+        "y": 579,
         "w": 352,
         "h": 82
+    },
+    {
+        "id": "2f5c8ca9e8a1c4f4",
+        "type": "group",
+        "z": "area-garage",
+        "name": "Wall Remote",
+        "style": {
+            "label": true
+        },
+        "nodes": [
+            "96f3ed5ac9f86054",
+            "97b5ac4ed4fbdc2b",
+            "6a04fdcfcf456686",
+            "3329e231bc4d53c1",
+            "120beac8e697a21a",
+            "400799e04362bfbb",
+            "7ea9c394b78eadf7",
+            "5b1b3ab146289caf"
+        ],
+        "x": 54,
+        "y": 39,
+        "w": 852,
+        "h": 142
     },
     {
         "id": "b3540c9dd3bcc69e",
@@ -103,7 +126,7 @@
         "payload": "{}",
         "payloadType": "json",
         "x": 170,
-        "y": 320,
+        "y": 500,
         "wires": [
             [
                 "fcc4a16405041973"
@@ -124,7 +147,7 @@
         "finalize": "",
         "libs": [],
         "x": 380,
-        "y": 320,
+        "y": 500,
         "wires": [
             [
                 "f0950e11ce175451"
@@ -147,7 +170,7 @@
         "expiry": "",
         "broker": "4cefa2ad2d8b462e",
         "x": 580,
-        "y": 320,
+        "y": 500,
         "wires": []
     },
     {
@@ -173,7 +196,7 @@
         "payload": "",
         "payloadType": "date",
         "x": 170,
-        "y": 200,
+        "y": 380,
         "wires": [
             [
                 "a1f38e10cf421267"
@@ -197,7 +220,7 @@
         "withCredentials": true,
         "timeout": 1,
         "x": 380,
-        "y": 200,
+        "y": 380,
         "wires": [
             [
                 "8d4f36b4a1801408"
@@ -210,7 +233,7 @@
         "z": "area-garage",
         "g": "e05aa055341a7cd0",
         "name": "Parse Event",
-        "func": "if (!isValidJSON(msg.payload)) {\n    return null;\n}\n\nmsg.payload = JSON.parse(msg.payload);\n\nconst p = msg.payload;\n\n// Only process known entities\nconst topicMap = {\n    'cover-garage_door':       'highland/state/garage/bay_one/door',\n    'light-garage_light':      'highland/state/garage/bay_one/light',\n    'lock-lock':               'highland/state/garage/bay_one/remote_lock',\n    'binary_sensor-obstruction': 'highland/state/garage/bay_one/obstruction',\n    'binary_sensor-motor':     'highland/state/garage/bay_one/motor',\n    'sensor-garage_openings':  'highland/state/garage/bay_one/openings'\n};\n\nif (!topicMap[p.id]) {\n    return null;\n} \n\n// Track last_direction for Smart Reversing (cover only)\nif (p.id === 'cover-garage_door') {\n    if (p.current_operation === 'OPENING') {\n        flow.set('garage_last_direction', 'OPENING');\n    } else if (p.current_operation === 'CLOSING') {\n        flow.set('garage_last_direction', 'CLOSING');\n    }\n}\n\n// Build state payload\nconst payload = {\n    timestamp: new Date().toISOString(),\n    source: 'garage_bridge',\n    state: p.state\n};\n\n// Add entity-specific fields\nif (p.id === 'cover-garage_door') {\n    payload.current_operation = p.current_operation;\n    payload.position = p.position;\n}\nif (p.id === 'sensor-garage_openings') {\n    payload.count = p.value;\n}\nif (p.id === 'light-garage_light') {\n    payload.color_mode = p.color_mode;\n}\n\nmsg.topic = topicMap[p.id];\nmsg.payload = JSON.stringify(payload);\nmsg.retain = true;\nmsg.qos = 1;\n\nconst formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\nnode.status({ fill: 'green', shape: 'dot', text: formatStatus(`${p.id}: ${p.state}`) });\n\nreturn msg;\n\nfunction isValidJSON(str) {\n  if (typeof str !== 'string') return false; // Must be a string to be JSON\n  try {\n    const result = JSON.parse(str);\n    // Optional: Ensure it's an object or array, as numbers/booleans are technically valid JSON\n    return (typeof result === 'object' && result !== null);\n  } catch (e) {\n    return false;\n  }\n}",
+        "func": "if (!isValidJSON(msg.payload)) {\n    return null;\n}\n\nmsg.payload = JSON.parse(msg.payload);\n\nconst p = msg.payload;\n\n// Only process known entities\nconst topicMap = {\n    'cover-garage_door':       'highland/state/garage/bay_one/door',\n    'light-garage_light':      'highland/state/garage/bay_one/light',\n    'lock-lock':               'highland/state/garage/bay_one/remote_lock',\n    'binary_sensor-obstruction': 'highland/state/garage/bay_one/obstruction',\n    'binary_sensor-motor':     'highland/state/garage/bay_one/motor',\n    'sensor-garage_openings':  'highland/state/garage/bay_one/openings'\n};\n\nif (!topicMap[p.id]) {\n    return null;\n} \n\n// Build state payload\nconst payload = {\n    timestamp: new Date().toISOString(),\n    source: 'garage_bridge',\n    state: p.state\n};\n\n// Add entity-specific fields\nif (p.id === 'cover-garage_door') {\n    payload.current_operation = p.current_operation;\n    payload.position = p.position;\n    flow.set('bay_one_door_state', {\n        state: p.state,\n        current_operation: p.current_operation,\n        position: p.position\n    });\n    flow.set('bay_one_last_direction',\n        p.current_operation === 'OPENING' ? 'OPENING' :\n        p.current_operation === 'CLOSING' ? 'CLOSING' :\n        flow.get('bay_one_last_direction') || 'UNKNOWN'\n    );\n}\n\nif (p.id === 'sensor-garage_openings') {\n    payload.count = p.value;\n}\n\nif (p.id === 'light-garage_light') {\n    payload.color_mode = p.color_mode;\n    flow.set('bay_one_light_state', p.state);\n}\n\nmsg.topic = topicMap[p.id];\nmsg.payload = JSON.stringify(payload);\nmsg.retain = true;\nmsg.qos = 1;\n\nconst formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\nnode.status({ fill: 'green', shape: 'dot', text: formatStatus(`${p.id}: ${p.state}`) });\n\nreturn msg;\n\nfunction isValidJSON(str) {\n  if (typeof str !== 'string') return false; // Must be a string to be JSON\n  try {\n    const result = JSON.parse(str);\n    // Optional: Ensure it's an object or array, as numbers/booleans are technically valid JSON\n    return (typeof result === 'object' && result !== null);\n  } catch (e) {\n    return false;\n  }\n}",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,
@@ -218,7 +241,7 @@
         "finalize": "",
         "libs": [],
         "x": 590,
-        "y": 200,
+        "y": 380,
         "wires": [
             [
                 "d4c51757a7160e57"
@@ -241,7 +264,7 @@
         "expiry": "",
         "broker": "4cefa2ad2d8b462e",
         "x": 780,
-        "y": 200,
+        "y": 380,
         "wires": []
     },
     {
@@ -259,7 +282,7 @@
         "rh": 0,
         "inputs": 0,
         "x": 160,
-        "y": 80,
+        "y": 260,
         "wires": [
             [
                 "f4c41e616749970b"
@@ -280,7 +303,7 @@
         "finalize": "",
         "libs": [],
         "x": 390,
-        "y": 80,
+        "y": 260,
         "wires": [
             [
                 "9844bf7f9abc6115"
@@ -305,7 +328,7 @@
         "senderr": false,
         "headers": [],
         "x": 600,
-        "y": 80,
+        "y": 260,
         "wires": [
             [
                 "6068e30e4b9d38c5"
@@ -326,7 +349,7 @@
         "finalize": "",
         "libs": [],
         "x": 800,
-        "y": 80,
+        "y": 260,
         "wires": [
             []
         ]
@@ -340,7 +363,7 @@
         "scope": null,
         "uncaught": false,
         "x": 140,
-        "y": 440,
+        "y": 620,
         "wires": [
             [
                 "c108fd4723befb5e"
@@ -362,8 +385,174 @@
         "statusVal": "",
         "statusType": "auto",
         "x": 310,
-        "y": 440,
+        "y": 620,
         "wires": []
+    },
+    {
+        "id": "96f3ed5ac9f86054",
+        "type": "mqtt in",
+        "z": "area-garage",
+        "g": "2f5c8ca9e8a1c4f4",
+        "name": "Bay One Cover",
+        "topic": "zwave/garage/garage_wall_remote/central_scene/endpoint_0/scene/001",
+        "qos": "1",
+        "datatype": "auto-detect",
+        "broker": "4cefa2ad2d8b462e",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 160,
+        "y": 80,
+        "wires": [
+            [
+                "6a04fdcfcf456686"
+            ]
+        ]
+    },
+    {
+        "id": "97b5ac4ed4fbdc2b",
+        "type": "mqtt in",
+        "z": "area-garage",
+        "g": "2f5c8ca9e8a1c4f4",
+        "name": "Bay One Light",
+        "topic": "zwave/garage/garage_wall_remote/central_scene/endpoint_0/scene/003",
+        "qos": "1",
+        "datatype": "auto-detect",
+        "broker": "4cefa2ad2d8b462e",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 150,
+        "y": 140,
+        "wires": [
+            [
+                "5b1b3ab146289caf"
+            ]
+        ]
+    },
+    {
+        "id": "6a04fdcfcf456686",
+        "type": "function",
+        "z": "area-garage",
+        "g": "2f5c8ca9e8a1c4f4",
+        "name": "Filter Single Tap",
+        "func": "const payload = typeof msg.payload === 'string'\n    ? JSON.parse(msg.payload)\n    : msg.payload;\n\nif (payload.value !== 0) return null;\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 380,
+        "y": 80,
+        "wires": [
+            [
+                "3329e231bc4d53c1"
+            ]
+        ]
+    },
+    {
+        "id": "3329e231bc4d53c1",
+        "type": "function",
+        "z": "area-garage",
+        "g": "2f5c8ca9e8a1c4f4",
+        "name": "Smart Reversing",
+        "func": "const door = flow.get('bay_one_door_state') || \n    { state: 'CLOSED', current_operation: 'IDLE', position: 0 };\nconst lastDirection = flow.get('bay_one_last_direction') || 'UNKNOWN';\n\nlet action;\n\nif (door.current_operation === 'OPENING' || door.current_operation === 'CLOSING') {\n    action = 'stop';\n} else if (door.position > 0 && door.position < 1) {\n    // Mid-travel, stopped\n    action = lastDirection === 'OPENING' ? 'close' :\n             lastDirection === 'CLOSING' ? 'open' : 'close'; // fail-safe\n} else if (door.state === 'CLOSED') {\n    action = 'open';\n} else {\n    action = 'close';\n}\n\nmsg.topic = 'highland/command/garage/bay_one/door';\nmsg.payload = JSON.stringify({ action });\n\nconst formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\nnode.status({ fill: 'blue', shape: 'dot', text: formatStatus(`→ ${action}`) });\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 610,
+        "y": 80,
+        "wires": [
+            [
+                "400799e04362bfbb"
+            ]
+        ]
+    },
+    {
+        "id": "120beac8e697a21a",
+        "type": "function",
+        "z": "area-garage",
+        "g": "2f5c8ca9e8a1c4f4",
+        "name": "Toggle Light",
+        "func": "const lightState = flow.get('bay_one_light_state') || 'OFF';\nconst newState = lightState === 'ON' ? 'OFF' : 'ON';\n\nmsg.topic = 'highland/command/garage/bay_one/light';\nmsg.payload = JSON.stringify({ state: newState });\n\nconst formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\nnode.status({ fill: 'blue', shape: 'dot', text: formatStatus(`→ ${newState}`) });\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 570,
+        "y": 140,
+        "wires": [
+            [
+                "7ea9c394b78eadf7"
+            ]
+        ]
+    },
+    {
+        "id": "400799e04362bfbb",
+        "type": "mqtt out",
+        "z": "area-garage",
+        "g": "2f5c8ca9e8a1c4f4",
+        "name": "Publish",
+        "topic": "",
+        "qos": "1",
+        "retain": "false",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "4cefa2ad2d8b462e",
+        "x": 820,
+        "y": 80,
+        "wires": []
+    },
+    {
+        "id": "7ea9c394b78eadf7",
+        "type": "mqtt out",
+        "z": "area-garage",
+        "g": "2f5c8ca9e8a1c4f4",
+        "name": "Publish",
+        "topic": "",
+        "qos": "1",
+        "retain": "false",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "4cefa2ad2d8b462e",
+        "x": 760,
+        "y": 140,
+        "wires": []
+    },
+    {
+        "id": "5b1b3ab146289caf",
+        "type": "function",
+        "z": "area-garage",
+        "g": "2f5c8ca9e8a1c4f4",
+        "name": "Filter Single Tap",
+        "func": "const payload = typeof msg.payload === 'string'\n    ? JSON.parse(msg.payload)\n    : msg.payload;\n\nif (payload.value !== 0) return null;\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 360,
+        "y": 140,
+        "wires": [
+            [
+                "120beac8e697a21a"
+            ]
+        ]
     },
     {
         "id": "4cefa2ad2d8b462e",
@@ -397,7 +586,7 @@
         "sessionExpiry": ""
     },
     {
-        "id": "80c3722314ee1c22",
+        "id": "769c815ce97c98ac",
         "type": "global-config",
         "env": [],
         "modules": {

@@ -106,6 +106,10 @@ POST http://{blaq_ip}/...
 
 ### Flow Groups
 
+**Wall Remote** — Two independent streams for ZEN37 bay one buttons:
+- `Bay One Cover`: MQTT in (scene/001) → `Filter Single Tap` → `Smart Reversing` → MQTT out
+- `Bay One Light`: MQTT in (scene/003) → `Filter Single Tap` → `Toggle Light` → MQTT out
+
 **Command Handler** — MQTT in (`highland/command/garage/bay_one/#`) → `Route Command` function → HTTP Request → `Log Response` function
 
 **Sinks** — On Startup inject → SSE client (`node-red-contrib-sse-client`) → `Parse Event` function → MQTT out (state topics, retained)
@@ -183,7 +187,20 @@ Node-RED publishes MQTT Discovery configs on startup (retained, idempotent). HA 
 
 ---
 
-## Smart Reversing (ZEN37 Wall Remote)
+### ZEN37 Wall Remote Topics
+
+| Button | Z-Wave JS UI Topic | Function |
+|--------|-------------------|----------|
+| Large button 1 | `zwave/garage/garage_wall_remote/central_scene/endpoint_0/scene/001` | Bay one door — Smart Reversing |
+| Small button 1 | `zwave/garage/garage_wall_remote/central_scene/endpoint_0/scene/003` | Bay one light — toggle |
+| Large button 2 | Reserved | Bay two door (future) |
+| Small button 2 | Reserved | Bay two light (future) |
+
+Payload filter: only `value === 0` (single tap) is processed. Double taps, holds, and releases are dropped by `Filter Single Tap`.
+
+```json
+{"time": 1234567890, "value": 0, "nodeName": "garage_wall_remote", "nodeLocation": "garage"}
+```
 
 The Zooz ZEN37 is a 4-button Z-Wave wall remote (2 large, 2 small buttons) mounted in the garage. It provides a physical toggle for the garage door that requires intelligent direction-awareness — a simple toggle command to the blaQ would be ambiguous mid-travel.
 
@@ -252,7 +269,7 @@ The SSE connection to the blaQ is long-lived. The bridge implements reconnection
 
 - [x] Confirm blaQ firmware version and whether SSE event field names are stable across updates — SSE stream confirmed, field names stable on current firmware
 - [x] Determine whether `cover` entity type in MQTT Discovery correctly supports `stop` command — confirmed working
-- [ ] Confirm Z-Wave JS UI topic format for ZEN37 scene/button events at implementation time
+- [x] Confirm Z-Wave JS UI topic format for ZEN37 scene/button events — confirmed: `zwave/garage/garage_wall_remote/central_scene/endpoint_0/scene/00N`, `value === 0` for single tap
 - [ ] Externalise blaQ IP address when config home for non-Zigbee/Z-Wave devices is established
 
 ---
