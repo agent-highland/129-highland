@@ -181,7 +181,7 @@ This is a Gmail-specific operation — it requires `X-GM-EXT-1` capability, whic
 - **Idempotent.** A rolling record of recently-published `Message-Id` values in flow context (default store, disk-backed) prevents duplicate publishes if the same mail is seen twice. TTL: 24 hours, enforced by scheduled sweep.
 - **ACK-gated archival.** After publishing, ingress waits for `highland/ack/email` with the matching `message_id` before archiving. This prevents loss if a consumer is down or restarting at publish time.
 - **Fallback archival TTL.** If no ACK arrives within a configured window (default 24 hours), the message is archived anyway with a warning log. Prevents indefinite accumulation of unacked state when a consumer is genuinely broken or unconfigured.
-- **Retention purge.** Messages carrying `Highland/Processed` older than a configurable retention (default 14 days) are permanently deleted by a scheduled sweep. This is the only destructive operation the flow performs.
+- **Retention purge.** Messages carrying `Highland/Processed` older than a configurable retention (default 14 days) are moved to `[Gmail]/Trash` by a scheduled sweep. Gmail's built-in 30-day Trash auto-purge finalizes permanent deletion. This Trash-based indirection provides a grace window for recovery if the sweeper misbehaves. This is the only destructive operation the flow performs.
 
 ---
 
@@ -254,29 +254,15 @@ Consumers publish an ACK after successful processing:
 
 ### Health
 
-**`highland/status/email_ingress/health`** — retained
+**Deferred — no current consumer.** A retained `highland/status/email_ingress/health` topic was originally planned for external uptime monitoring and dashboard surfacing. On 2026-04-22, this was deferred:
 
-```json
-{
-  "status": "healthy",
-  "imap_connection": "connected",
-  "connected_at": "2026-04-22T07:20:00-04:00",
-  "watching_folder": "[Gmail]/All Mail",
-  "messages_in_flight": 0,
-  "stale_messages": 0,
-  "last_error": null,
-  "timestamp": "2026-04-22T07:20:00-04:00"
-}
-```
+- External uptime monitoring in Highland goes through Healthchecks.io via HTTP pings, not MQTT subscription — a health topic doesn't feed that pipeline.
+- No dashboard consumer identified. Email Ingress is infrastructure; human-facing state belongs to consuming flows (`sensor.mail_status`, etc.).
+- No cross-flow coordinator needs ingress health as an input — consumers already depend on ingress implicitly via MQTT event subscriptions.
 
-`status` values: `"healthy"` | `"degraded"` | `"unhealthy"`.
+The operationally-meaningful failure mode (app password revocation, persistent auth failure) is better served by direct notification to the operator than by a retained status topic. That path is tracked under the Open Question about ingress failure notifications.
 
-Published on a periodic interval (60s) and on significant state changes.
-
-Degraded conditions: messages past ACK TTL still in-flight, repeated parse failures from a consumer, recent but recovered IMAP errors.
-Unhealthy conditions: IMAP authentication failure (likely app password revoked), connection closed and failing to re-establish, no new events in an unexpectedly long window.
-
-Per `nodered/HEALTH_MONITORING.md`, this topic is a first-class health surface — Healthchecks.io pings from this flow monitor external availability.
+If a real consumer for this topic emerges later (HA sensor, external monitoring integration), the health publisher can be built at that point, sized to the actual consumer's needs.
 
 ---
 
@@ -318,6 +304,11 @@ The IMAP client handle and the mailbox lock are stored in the `volatile` context
 | `imap_last_uid_all_mail` | flow | default | High-water UID for All Mail; survives restarts to avoid backlog reprocessing |
 | `imap_pending_ack` | flow | default | Map of `message_id` → `{ uid, gmail_label, published_at }` for in-flight ACK tracking |
 | `imap_seen_<message_id>` | flow | default | Dedup entries with `{ seen_at }` timestamp for 24h TTL enforcement |
+| `imap_consecutive_failures` | flow | default | Counter of consecutive connection failures since last success. Reset on successful connect. Drives notification threshold. |
+| `imap_notification_sent` | flow | default | `correlation_id` of currently-active failure notification, or `null`. Used to avoid re-firing and to clear on recovery. |
+| `imap_last_failure_at` | flow | default | Timestamp of most recent connection failure (ms since epoch) |
+| `imap_last_failure_tier` | flow | default | Tier of most recent notification (`"auth"` or `"connection"`), or `null` |
+| `retention_sweep_running` | flow | volatile | Re-entrancy guard for the Retention Sweeper. Prevents stacked async sweeps when the CronPlus is manually triggered rapidly. Cleared on Node-RED restart (as appropriate for a mid-operation guard). |
 
 ### Connection lifecycle events
 
@@ -346,6 +337,166 @@ if (client) {
 }
 ```
 
+### Async Function Node Hygiene
+
+Several function nodes in this flow launch async work (`(async () => {...})()`) to invoke imapflow operations. Three related hazards apply:
+
+1. **Connection contention.** imapflow's mailbox lock serializes operations on the underlying connection — not per-mailbox. Only one mailbox can be "selected" at a time on an IMAP connection (a fundamental protocol constraint). If one function holds the connection's mailbox lock indefinitely (such as the Watcher during IDLE), any other function waiting for a lock on **any** mailbox on the same connection will queue forever, never erroring, never resolving.
+2. **Stacking** — if the function fires rapidly (manual CronPlus triggers, debouncing bugs, etc.), multiple pending async IIFEs queue up. Each one races to acquire resources (mailbox locks, connection calls).
+3. **Shutdown noise** — on Node-RED redeploy/restart, the connection is torn down while pending async work is still in flight. Those operations fail with `"Connection not available"` or similar, which the catch block would normally log as errors. These aren't real errors — they're the expected consequence of shutting down.
+
+**Connection contention resolution.** The main flow's client is permanently busy IDLE-locked on `[Gmail]/All Mail`. Any sweeper or background operation that needs to interact with a *different* mailbox on the main client will block forever (discovered on 2026-04-23 — the Retention Sweeper initially tried to acquire a lock on `Highland/Processed` on the main client and silently enqueued one orphan lock request per firing, accumulating until restart when they all rejected simultaneously with `"Connection not available"`).
+
+The resolution is to **open a dedicated short-lived connection** for such operations. The connection lives only for the duration of the work (open → act → logout) and does not interfere with the main flow's client. Gmail's 15-connection-per-account budget accommodates this fine; our use of one sweep connection for a few seconds per day is negligible.
+
+Currently applied in: Retention Sweeper (connects, searches, moves to Trash, logs out per run).
+
+**Re-entrancy guards.** For functions where stacking is possible (currently: the Retention Sweeper via manual CronPlus triggering), set a `<name>_running` flag in `volatile` context at entry and clear it in the `finally` block:
+
+```javascript
+if (flow.get('retention_sweep_running', 'volatile')) {
+    node.warn('Already running; skipping this trigger');
+    return null;
+}
+flow.set('retention_sweep_running', true, 'volatile');
+
+(async () => {
+    try {
+        // ... work ...
+    } finally {
+        flow.set('retention_sweep_running', false, 'volatile');
+    }
+})();
+```
+
+**Shutdown-error silencing.** Catch blocks in async IMAP operations should distinguish shutdown-triggered errors from real failures, logging only the latter:
+
+```javascript
+} catch (err) {
+    const isShutdownError = err.message && (
+        err.message.includes('Connection not available') ||
+        err.message.includes('Connection closed')
+    );
+    if (isShutdownError) {
+        node.status({ fill: 'grey', shape: 'ring', text: formatStatus('Aborted (connection closed)') });
+    } else {
+        node.warn(`Error: ${err.message}`);
+        // ... real error handling ...
+    }
+}
+```
+
+Currently applied in: Retention Sweeper. Consider extending to `Publish New Message` and `Archive Message` if shutdown noise from those becomes operationally bothersome.
+
+---
+
+## Operator Notifications
+
+When the flow detects a failure condition that requires human action, it publishes a notification via the standard Highland notification contract (`highland/event/notify`). When the condition clears, it publishes a corresponding clear command (`highland/command/notify/clear`). Consumers receive notifications via whatever channels `Utility: Notifications` is configured to route through — typically HA Companion App.
+
+This replaces the originally-planned retained health topic (see § Health). Direct notification is the right signal for the operationally-meaningful failure modes; a retained status topic with no consumer would have been infrastructure-in-search-of-a-consumer.
+
+### Failure tiers
+
+Four tiers of failure were considered during design. Only Tiers 1 and 2 are currently implemented; Tiers 3 and 4 are deferred pending need.
+
+| Tier | Implemented | Condition | Rationale |
+|------|:-----------:|-----------|-----------|
+| 1 | ✅ | Persistent IMAP auth failure | App password revoked/invalidated. Mail stops flowing until operator regenerates and updates `secrets.json`. Blocking failure. |
+| 2 | ✅ | Persistent non-auth connection failure | Network, DNS, Gmail outage, TLS issues. Same end state as Tier 1 (no mail flows) but different operator action. |
+| 3 | ❌ deferred | Repeated `parse_error` ACKs from a consumer | Consumer parser bug or email format change. System is silently failing to do its job, but ingress itself is healthy. Requires per-consumer counters with windowing — not yet worth the complexity. |
+| 4 | ❌ deferred | Stale pending-ACK accumulation | Indicates a consumer is down or no consumer exists for a label. Sweepers already force-archive with warning log; additional notification would be double-reporting. |
+
+### Trigger threshold
+
+Connection failures are counted consecutively in `imap_consecutive_failures`. Notification fires after **3 consecutive failures**, which filters out transient blips while still surfacing real failures within minutes (connection retries are frequent; 3 failures typically means the problem is not self-correcting).
+
+The counter resets to 0 on any successful connection (reused or freshly opened). A notification is only fired once per failure episode — if the flow is already in the "failing and notified" state, subsequent failures increment the counter but do not re-fire.
+
+### Tier discrimination
+
+Auth failures vs. other connection failures are discriminated by string-matching the imapflow error message:
+
+```javascript
+function isAuthError(errMessage) {
+    if (!errMessage) return false;
+    const msg = errMessage.toLowerCase();
+    return msg.includes('authentication') ||
+           msg.includes('invalid credentials') ||
+           msg.includes('auth failed') ||
+           msg.includes('login failed');
+}
+```
+
+Imperfect — a novel error message could be miscategorized — but good enough to differentiate "regenerate your app password" from "check your network" in the notification text. Both paths share the same `notification_id`, so the underlying subscription configuration (targets, severity) is identical; only the title and message differ.
+
+### Notification payloads
+
+**Auth failure notification:**
+
+```json
+{
+  "notification_id": "email_ingress.imap_failure",
+  "timestamp": "2026-04-23T10:15:00Z",
+  "source": "email_ingress",
+  "title": "Email Ingress: IMAP authentication failed",
+  "message": "Gmail app password appears to be invalid. Regenerate in Google Account security settings and update secrets.json. Error: <err message>",
+  "correlation_id": "email_ingress_imap_failure_<timestamp>",
+  "sticky": true
+}
+```
+
+**Connection failure notification:**
+
+```json
+{
+  "notification_id": "email_ingress.imap_failure",
+  "timestamp": "2026-04-23T10:15:00Z",
+  "source": "email_ingress",
+  "title": "Email Ingress: IMAP connection failing",
+  "message": "Cannot establish connection to Gmail IMAP after N attempts. Mail is not flowing. Error: <err message>",
+  "correlation_id": "email_ingress_imap_failure_<timestamp>",
+  "sticky": true
+}
+```
+
+**Clear command** (published on first successful connection after a notification was active):
+
+```json
+{
+  "notification_id": "email_ingress.imap_failure",
+  "correlation_id": "<same correlation_id as the fired notification>"
+}
+```
+
+### Severity rationale
+
+`high`, not `critical`. Email Ingress is infrastructure for ancillary subsystems (Deliveries today, more in the future). None of its current or near-term consumers are life-safety, so waking the operator at 3am isn't warranted. `high` still prompts for attention on normal devices but respects an explicit Do Not Disturb window — the mail can wait until morning.
+
+Re-evaluate if email ingress ever becomes a dependency of a life-safety system.
+
+### Recovery semantics
+
+On successful connection after a notification was active:
+1. Publish `highland/command/notify/clear` with the stored `correlation_id`
+2. Reset `imap_notification_sent`, `imap_consecutive_failures`, `imap_last_failure_tier` to their default states
+3. No "recovery" notification is sent — silence is the recovery signal
+
+Rationale: if the operator just fixed a problem, they don't need to be told it's fixed. If the flow self-recovered (transient issue), notifying would be unnecessary interruption.
+
+### Subscription config
+
+Added to `notifications.json`:
+
+```json
+"email_ingress.imap_failure": {
+    "targets": ["people.joseph.ha_companion"],
+    "severity": "high"
+}
+```
+
+Change target routing by editing this subscription; no flow code changes required.
+
 ---
 
 ## Flow Outline — `Utility: Email Ingress`
@@ -354,15 +505,16 @@ Per `nodered/OVERVIEW.md` conventions: groups are the primary organizing unit; l
 
 **Group 1 — Sinks**
 - `inject` — Startup (once, ~3s delay after deploy)
-- `inject` — Health ticker (every 60s)
-- `inject` — ACK TTL sweeper (every 10min)
-- `inject` — Retention sweeper (daily)
+- CronPlus — ACK TTL sweeper (every 10min)
+- CronPlus — Dedup TTL sweeper (every 1h)
+- CronPlus — Retention sweeper (daily)
 - `mqtt in` — `highland/ack/email`
 - `mqtt in` — `highland/command/config/reload/secrets` (triggers disconnect + reconnect)
-- Each sinks link-out to its respective downstream group
+- Each sink link-outs to its respective downstream group
 
 **Group 2 — Connection**
-- `Ensure Connection` function node: returns existing client if healthy, else opens new one. Stores handle in `volatile`. Wires error/close handlers with identity guards.
+- `Ensure Connection` function node: returns existing client if healthy, else opens new one. Stores handle in `volatile`. Wires error/close handlers with identity guards. Tracks consecutive connection failures and emits operator notifications on threshold crossings (see § Operator Notifications).
+- Two outputs: output 1 → successful-connection path (to Watcher). Output 2 → notification events / clear commands (to MQTT out, topic set by message).
 - `On Stop` cleanup: graceful logout
 
 **Group 3 — Watcher**
@@ -398,18 +550,14 @@ Per `nodered/OVERVIEW.md` conventions: groups are the primary organizing unit; l
 
 **Group 9 — Label Archival**
 - Function node: applies `Highland/Processed`, removes the source `Highland/*` label on the UID
-- Uses `client.messageAddLabels()` and `client.messageRemoveLabels()` from X-GM-EXT-1
+- Uses `client.messageFlagsAdd()` and `client.messageFlagsRemove()` with `useLabels: true` (X-GM-EXT-1 extension)
 
 **Group 10 — Lifecycle Sweepers**
-- ACK TTL sweeper: scans `imap_pending_ack` for stale entries, force-archives, logs warning
-- Retention sweeper: searches `Highland/Processed` for mail older than retention, deletes
-- Dedup sweeper: scans `imap_seen_*` keys, removes entries older than TTL
+- ACK TTL sweeper (every 10min): scans `imap_pending_ack` for stale entries, force-archives via Archive Message, logs warning
+- Dedup TTL sweeper (every 1h): enumerates `imap_seen_*` keys, removes entries older than dedup TTL
+- Retention sweeper (daily, 3am): searches `Highland/Processed` for mail older than retention, moves to `[Gmail]/Trash` for Gmail's auto-purge to finalize
 
-**Group 11 — Health Publisher**
-- Function node: assembles health payload from context
-- Publishes retained to `highland/status/email_ingress/health`
-
-**Group 12 — Error Handling**
+**Group 11 — Error Handling**
 - Standard project pattern: `catch` node + log/notify function node
 
 ---
@@ -431,8 +579,7 @@ Captured in `config/email_ingress.json` (pending final decision on file structur
   "ack_timeout_hours": 24,
   "processed_retention_days": 14,
   "parse_error_notification_threshold": 3,
-  "dedup_ttl_hours": 24,
-  "health_publish_interval_seconds": 60
+  "dedup_ttl_hours": 24
 }
 ```
 
@@ -454,11 +601,12 @@ Per `nodered/STARTUP_SEQUENCING.md` patterns:
 
 - [ ] **Config file location.** `email_ingress.json` standalone vs folded into a broader file. Same question surfaced in `DELIVERIES.md`; settle both together.
 - [ ] **Reprocessing mechanism.** A `highland/command/email_ingress/reprocess` topic for manual reprocessing of historical mail. Primary use case: filter criteria drift — if a Gmail filter stops matching (e.g., USPS changes sender domain), messages land unlabeled in the Inbox. After updating the filter and manually labeling the backlog, a reprocess command would flow those messages through the normal pipeline. Secondary use cases: operator-initiated reprocessing after parser fixes, or deliberate reclassification. This was explicitly considered vs. ambient label-change detection (via IMAP `flags` events) on 2026-04-22 — explicit reprocess was chosen for lower complexity, better signal-to-noise, and cleaner semantics. Payload shape TBD (candidates: `{uid_range}`, `{message_ids}`, `{label, since}`). Priority elevated from "future" to near-term.
-- [ ] **Notification routing for ingress failures.** App-password revocation or IMAP auth failure needs to reach a human. Current thinking: tie into `Utility: Notifications` with severity `critical`, targeting the Daily Digest recipient. Confirm when notifications framework is wired into this flow.
+- [ ] **Notification routing for ingress failures.** ~~App-password revocation or IMAP auth failure needs to reach a human.~~ **Resolved 2026-04-23** — see § Operator Notifications. Persistent IMAP failures (auth or connection) fire a `high`-severity notification via `notification_id: email_ingress.imap_failure` after 3 consecutive failures. Auth and non-auth failures share a notification subscription but use different title/message strings based on error heuristics. Notification clears automatically on successful reconnect. Tier 3 (per-consumer parse_error tracking) and Tier 4 (stale pending-ACK accumulation) deferred — see § Operator Notifications.
 - [ ] **Attachment fetch mechanism.** If a future consumer ever needs attachment bytes, a fetch-by-message-id pattern is the intended approach — but exact topic shape is deferred until a concrete consumer drives it.
 - [ ] **Rejection semantics if multiple consumers share a label.** Current design assumes one consumer per label. If that assumption ever breaks, rework needed.
 - [ ] **Gmail filter configuration tracking.** The manually-configured filters aren't version-controlled. Consider capturing them in a reference doc as they proliferate, so a rebuild isn't an archaeological dig through Gmail settings.
+- [ ] **Health topic — deferred.** The retained `highland/status/email_ingress/health` topic described in earlier drafts was deferred on 2026-04-22 in favor of direct notifications for the failure modes that actually matter (see above). Reconsider if a specific consumer emerges (HA sensor, external dashboard, cross-flow coordination).
 
 ---
 
-*Last Updated: 2026-04-22*
+*Last Updated: 2026-04-23*

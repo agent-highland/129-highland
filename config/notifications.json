@@ -57,6 +57,10 @@
     "weather.precip_forecast": {
       "targets": ["people.joseph.ha_companion"],
       "severity": "low"
+    },
+    "email_ingress.imap_failure": {
+      "targets": ["people.joseph.ha_companion"],
+      "severity": "high"
     }
   }
 }

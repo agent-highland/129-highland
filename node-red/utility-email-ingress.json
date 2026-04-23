@@ -27,12 +27,15 @@
             "d806f8e656374ae5",
             "847d9604cf4fc1a8",
             "2244203d5de3a642",
-            "7678a83aa0a44357"
+            "7678a83aa0a44357",
+            "a6d62ed737e628fe",
+            "25369cfb86518580",
+            "a724400d651d7dda"
         ],
         "x": 34,
         "y": 19,
         "w": 1292,
-        "h": 202
+        "h": 322
     },
     {
         "id": "635b4d92332f3bcb",
@@ -52,7 +55,7 @@
             "22378cd3c8842981"
         ],
         "x": 34,
-        "y": 379,
+        "y": 759,
         "w": 572,
         "h": 202
     },
@@ -69,9 +72,31 @@
             "8e52ce8ccee76dc5"
         ],
         "x": 34,
-        "y": 259,
+        "y": 619,
         "w": 352,
         "h": 82
+    },
+    {
+        "id": "acd5d8fdcf53f061",
+        "type": "group",
+        "z": "utility-email-ingress",
+        "name": "Lifecycle Management",
+        "style": {
+            "label": true
+        },
+        "nodes": [
+            "c01fcf1fd3aea8e3",
+            "ab418e34eb8b6f6f",
+            "7c7aaae4a17ff05b",
+            "6f0843d6b1f903f7",
+            "f834db3352c1e294",
+            "b075a8e1f165473d",
+            "02f1db2ad645f752"
+        ],
+        "x": 34,
+        "y": 379,
+        "w": 532,
+        "h": 202
     },
     {
         "id": "9733b5f0d87597d2",
@@ -109,8 +134,8 @@
         "z": "utility-email-ingress",
         "g": "14fa5af5ee89f3c7",
         "name": "Ensure Connection",
-        "func": "const { ImapFlow } = imapflowPkg;\nconst formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\n\nconst creds = global.get('config')?.secrets?.gmail;\nif (!creds?.account || !creds?.app_password) {\n    node.status({ fill: 'red', shape: 'ring', text: formatStatus('Missing Gmail creds') });\n    node.error('Gmail credentials not found in config.secrets.gmail');\n    return null;\n}\n\n// Reuse existing healthy connection if present\nconst existing = flow.get('imap_client', 'volatile');\nif (existing && existing.usable) {\n    const connectedAt = flow.get('imap_connected_at') || Date.now();\n    const ageSec = Math.floor((Date.now() - connectedAt) / 1000);\n    node.status({ fill: 'green', shape: 'dot', text: formatStatus(`Reused (age ${ageSec}s)`) });\n    msg.payload = { reused: true, age_seconds: ageSec };\n    return msg;\n}\n\n// Open a fresh connection\nnode.status({ fill: 'yellow', shape: 'ring', text: formatStatus('Connecting...') });\n\n(async () => {\n    const client = new ImapFlow({\n        host: 'imap.gmail.com',\n        port: 993,\n        secure: true,\n        auth: {\n            user: creds.account,\n            pass: creds.app_password.replace(/\\s+/g, '')\n        },\n        logger: false\n    });\n\n    client.on('error', (err) => {\n        node.warn(`IMAP error event: ${err.message}`);\n        if (flow.get('imap_client', 'volatile') === client) {\n            flow.set('imap_client', null, 'volatile');\n            flow.set('imap_connected_at', null);\n        }\n    });\n\n    client.on('close', () => {\n        //node.warn('IMAP close event');\n        if (flow.get('imap_client', 'volatile') === client) {\n            flow.set('imap_client', null, 'volatile');\n            flow.set('imap_connected_at', null);\n        }\n    });\n\n    try {\n        await client.connect();\n        flow.set('imap_client', client, 'volatile');\n        flow.set('imap_connected_at', Date.now());\n        node.status({ fill: 'green', shape: 'dot', text: formatStatus('Connected (fresh)') });\n        node.send({ payload: { reused: false, connected_at: new Date().toISOString() } });\n    } catch (err) {\n        flow.set('imap_client', null, 'volatile');\n        flow.set('imap_connected_at', null);\n        node.status({ fill: 'red', shape: 'ring', text: formatStatus(`Error: ${err.message}`) });\n        node.error(`IMAP connect failed: ${err.message}`);\n    }\n})();\n\nreturn null;",
-        "outputs": 1,
+        "func": "const { ImapFlow } = imapflowPkg;\nconst formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\nconst FAILURE_THRESHOLD = 3;\n\nconst creds = global.get('config')?.secrets?.gmail;\nif (!creds?.account || !creds?.app_password) {\n    node.status({ fill: 'red', shape: 'ring', text: formatStatus('Missing Gmail creds') });\n    node.error('Gmail credentials not found in config.secrets.gmail');\n    return null;\n}\n\n// --- Helpers ---\n\nfunction isAuthError(errMessage) {\n    if (!errMessage) return false;\n    const msg = errMessage.toLowerCase();\n    return msg.includes('authentication') ||\n           msg.includes('invalid credentials') ||\n           msg.includes('auth failed') ||\n           msg.includes('login failed');\n}\n\nfunction handleRecovery() {\n    const activeNotification = flow.get('imap_notification_sent');\n    if (activeNotification) {\n        // Clear the notification\n        node.send([null, {\n            topic: 'highland/command/notify/clear',\n            payload: {\n                notification_id: 'email_ingress.imap_failure',\n                correlation_id: activeNotification\n            }\n        }]);\n        flow.set('imap_notification_sent', null);\n        flow.set('imap_last_failure_tier', null);\n        node.warn(`IMAP recovered; cleared notification ${activeNotification}`);\n    }\n    flow.set('imap_consecutive_failures', 0);\n}\n\nfunction handleFailure(err) {\n    const failures = (flow.get('imap_consecutive_failures') || 0) + 1;\n    flow.set('imap_consecutive_failures', failures);\n    flow.set('imap_last_failure_at', Date.now());\n    flow.set('imap_last_error', err.message);\n\n    if (failures < FAILURE_THRESHOLD) {\n        node.warn(`IMAP connection failure ${failures}/${FAILURE_THRESHOLD}: ${err.message}`);\n        return;\n    }\n\n    if (flow.get('imap_notification_sent')) {\n        node.warn(`IMAP still failing (${failures} consecutive); notification already active`);\n        return;\n    }\n\n    // Threshold crossed — publish notification\n    const tier = isAuthError(err.message) ? 'auth' : 'connection';\n    const correlationId = `email_ingress_imap_failure_${Date.now()}`;\n\n    const notification = tier === 'auth' ? {\n        notification_id: 'email_ingress.imap_failure',\n        timestamp: new Date().toISOString(),\n        source: 'email_ingress',\n        title: 'Email Ingress: IMAP authentication failed',\n        message: `Gmail app password appears to be invalid. Regenerate in Google Account security settings and update secrets.json. Error: ${err.message}`,\n        correlation_id: correlationId,\n        sticky: true\n    } : {\n        notification_id: 'email_ingress.imap_failure',\n        timestamp: new Date().toISOString(),\n        source: 'email_ingress',\n        title: 'Email Ingress: IMAP connection failing',\n        message: `Cannot establish connection to Gmail IMAP after ${failures} attempts. Mail is not flowing. Error: ${err.message}`,\n        correlation_id: correlationId,\n        sticky: true\n    };\n\n    node.send([null, {\n        topic: 'highland/event/notify',\n        payload: notification\n    }]);\n\n    flow.set('imap_notification_sent', correlationId);\n    flow.set('imap_last_failure_tier', tier);\n    node.warn(`IMAP failure threshold crossed (${failures}); published ${tier} notification`);\n}\n\n// --- Main logic ---\n\n// Reuse existing healthy connection if present\nconst existing = flow.get('imap_client', 'volatile');\nif (existing && existing.usable) {\n    // Healthy reuse — clear any stale notification, reset failure counter\n    handleRecovery();\n\n    const connectedAt = flow.get('imap_connected_at') || Date.now();\n    const ageSec = Math.floor((Date.now() - connectedAt) / 1000);\n    node.status({ fill: 'green', shape: 'dot', text: formatStatus(`Reused (age ${ageSec}s)`) });\n    msg.payload = { reused: true, age_seconds: ageSec };\n    return [msg, null];\n}\n\n// Open a fresh connection\nnode.status({ fill: 'yellow', shape: 'ring', text: formatStatus('Connecting...') });\n\n(async () => {\n    const client = new ImapFlow({\n        host: 'imap.gmail.com',\n        port: 993,\n        secure: true,\n        auth: {\n            user: creds.account,\n            pass: creds.app_password.replace(/\\s+/g, '')\n        },\n        logger: false\n    });\n\n    client.on('error', (err) => {\n        node.warn(`IMAP error event: ${err.message}`);\n        if (flow.get('imap_client', 'volatile') === client) {\n            flow.set('imap_client', null, 'volatile');\n            flow.set('imap_connected_at', null);\n        }\n    });\n\n    client.on('close', () => {\n        //node.warn('IMAP close event');\n        if (flow.get('imap_client', 'volatile') === client) {\n            flow.set('imap_client', null, 'volatile');\n            flow.set('imap_connected_at', null);\n        }\n    });\n\n    try {\n        await client.connect();\n        flow.set('imap_client', client, 'volatile');\n        flow.set('imap_connected_at', Date.now());\n        handleRecovery();\n        node.status({ fill: 'green', shape: 'dot', text: formatStatus('Connected (fresh)') });\n        node.send([{ payload: { reused: false, connected_at: new Date().toISOString() } }, null]);\n    } catch (err) {\n        flow.set('imap_client', null, 'volatile');\n        flow.set('imap_connected_at', null);\n        node.status({ fill: 'red', shape: 'ring', text: formatStatus(`Error: ${err.message}`) });\n        node.error(`IMAP connect failed: ${err.message}`);\n        handleFailure(err);\n    }\n})();\n\nreturn null;",
+        "outputs": 2,
         "timeout": 0,
         "noerr": 0,
         "initialize": "",
@@ -126,6 +151,9 @@
         "wires": [
             [
                 "fe28cf3555153230"
+            ],
+            [
+                "a724400d651d7dda"
             ]
         ]
     },
@@ -152,7 +180,7 @@
         "payload": "",
         "payloadType": "date",
         "x": 140,
-        "y": 420,
+        "y": 800,
         "wires": [
             [
                 "3a1898f86e6ef59c"
@@ -173,7 +201,7 @@
         "finalize": "",
         "libs": [],
         "x": 330,
-        "y": 420,
+        "y": 800,
         "wires": [
             [
                 "9cd0da9e916407b0"
@@ -213,7 +241,7 @@
         "statusVal": "",
         "statusType": "auto",
         "x": 510,
-        "y": 420,
+        "y": 800,
         "wires": []
     },
     {
@@ -313,7 +341,7 @@
         "scope": null,
         "uncaught": false,
         "x": 120,
-        "y": 300,
+        "y": 660,
         "wires": [
             [
                 "8e52ce8ccee76dc5"
@@ -335,7 +363,7 @@
         "statusVal": "",
         "statusType": "auto",
         "x": 290,
-        "y": 300,
+        "y": 660,
         "wires": []
     },
     {
@@ -353,7 +381,7 @@
         "rh": 0,
         "inputs": 0,
         "x": 110,
-        "y": 120,
+        "y": 180,
         "wires": [
             [
                 "d806f8e656374ae5"
@@ -374,10 +402,10 @@
         "finalize": "",
         "libs": [],
         "x": 280,
-        "y": 120,
+        "y": 180,
         "wires": [
             [
-                "847d9604cf4fc1a8"
+                "25369cfb86518580"
             ],
             [
                 "7678a83aa0a44357"
@@ -389,7 +417,7 @@
         "type": "function",
         "z": "utility-email-ingress",
         "g": "14fa5af5ee89f3c7",
-        "name": "Archive",
+        "name": "Process Message",
         "func": "const formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\nconst PROCESSED_LABEL = 'Highland/Processed';\nconst LABEL_PREFIX = 'Highland/';\n\nconst { uid, gmail_label, message_id, consumer, ack_status } = msg.payload;\nconst client = flow.get('imap_client', 'volatile');\n\nif (!client || !client.usable) {\n    node.warn(`Client unavailable; cannot archive UID ${uid}`);\n    node.status({ fill: 'red', shape: 'ring', text: formatStatus('No client') });\n    return null;\n}\n\nnode.status({ fill: 'yellow', shape: 'ring', text: formatStatus(`Archiving UID ${uid}...`) });\n\n(async () => {\n    try {\n        // Apply Highland/Processed\n        await client.messageFlagsAdd(uid, [PROCESSED_LABEL], { uid: true, useLabels: true });\n\n        // Remove the source Highland label\n        // Defensive check guards against removing Highland/Processed itself in edge cases\n        if (gmail_label && gmail_label !== PROCESSED_LABEL && gmail_label.startsWith(LABEL_PREFIX)) {\n            await client.messageFlagsRemove(uid, [gmail_label], { uid: true, useLabels: true });\n        }\n\n        node.status({\n            fill: 'green',\n            shape: 'dot',\n            text: formatStatus(`Archived UID ${uid}`)\n        });\n        node.warn(`Archived UID ${uid}: +${PROCESSED_LABEL}, -${gmail_label} (consumer=${consumer}, status=${ack_status})`);\n\n        node.send({\n            payload: {\n                uid,\n                message_id,\n                applied: PROCESSED_LABEL,\n                removed: gmail_label,\n                consumer,\n                ack_status,\n                archived_at: new Date().toISOString()\n            }\n        });\n    } catch (err) {\n        node.status({ fill: 'red', shape: 'ring', text: formatStatus(`Archive failed: ${err.message}`) });\n        node.warn(`Failed to archive UID ${uid}: ${err.message}`);\n    }\n})();\n\nreturn null;",
         "outputs": 1,
         "timeout": 0,
@@ -397,8 +425,8 @@
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 460,
-        "y": 120,
+        "x": 350,
+        "y": 300,
         "wires": [
             [
                 "2244203d5de3a642"
@@ -419,8 +447,8 @@
         "targetType": "full",
         "statusVal": "",
         "statusType": "auto",
-        "x": 630,
-        "y": 120,
+        "x": 550,
+        "y": 300,
         "wires": []
     },
     {
@@ -438,7 +466,7 @@
         "statusVal": "",
         "statusType": "auto",
         "x": 450,
-        "y": 180,
+        "y": 240,
         "wires": []
     },
     {
@@ -457,7 +485,7 @@
         "rh": 0,
         "inputs": 0,
         "x": 140,
-        "y": 480,
+        "y": 860,
         "wires": [
             [
                 "b4c0fca27678aafc"
@@ -478,7 +506,7 @@
         "finalize": "",
         "libs": [],
         "x": 340,
-        "y": 480,
+        "y": 860,
         "wires": [
             [
                 "b7619b6eb7708c38",
@@ -502,7 +530,7 @@
         "expiry": "",
         "broker": "4cefa2ad2d8b462e",
         "x": 510,
-        "y": 480,
+        "y": 860,
         "wires": []
     },
     {
@@ -520,7 +548,243 @@
         "statusVal": "",
         "statusType": "auto",
         "x": 510,
+        "y": 920,
+        "wires": []
+    },
+    {
+        "id": "a6d62ed737e628fe",
+        "type": "link in",
+        "z": "utility-email-ingress",
+        "g": "14fa5af5ee89f3c7",
+        "name": "Archive",
+        "links": [
+            "25369cfb86518580",
+            "7c7aaae4a17ff05b"
+        ],
+        "x": 150,
+        "y": 300,
+        "wires": [
+            [
+                "847d9604cf4fc1a8"
+            ]
+        ],
+        "l": true
+    },
+    {
+        "id": "25369cfb86518580",
+        "type": "link out",
+        "z": "utility-email-ingress",
+        "g": "14fa5af5ee89f3c7",
+        "name": "Archive",
+        "mode": "link",
+        "links": [
+            "a6d62ed737e628fe"
+        ],
+        "x": 460,
+        "y": 180,
+        "wires": [],
+        "l": true
+    },
+    {
+        "id": "c01fcf1fd3aea8e3",
+        "type": "cronplus",
+        "z": "utility-email-ingress",
+        "g": "acd5d8fdcf53f061",
+        "name": "ACK TTL",
+        "outputField": "payload",
+        "timeZone": "",
+        "storeName": "",
+        "commandResponseMsgOutput": "output2",
+        "defaultLocation": "",
+        "defaultLocationType": "default",
+        "outputs": 2,
+        "options": [
+            {
+                "name": "Every Ten Minutes",
+                "topic": "every-ten-minutes",
+                "payloadType": "default",
+                "payload": "",
+                "expressionType": "cron",
+                "expression": "0 */10 * * * *",
+                "location": "",
+                "offset": "0",
+                "solarType": "all",
+                "solarEvents": "sunrise,sunset"
+            }
+        ],
+        "x": 140,
+        "y": 420,
+        "wires": [
+            [
+                "ab418e34eb8b6f6f"
+            ],
+            []
+        ]
+    },
+    {
+        "id": "ab418e34eb8b6f6f",
+        "type": "function",
+        "z": "utility-email-ingress",
+        "g": "acd5d8fdcf53f061",
+        "name": "Sweep",
+        "func": "const formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\nconst ACK_TIMEOUT_MS = 24 * 60 * 60 * 1000; // TODO: read from config\n\nconst pending = flow.get('imap_pending_ack') || {};\nconst now = Date.now();\nconst staleEntries = [];\n\nfor (const [message_id, entry] of Object.entries(pending)) {\n    const age = now - (entry.published_at || 0);\n    if (age > ACK_TIMEOUT_MS) {\n        staleEntries.push({ message_id, entry, age });\n    }\n}\n\nif (staleEntries.length === 0) {\n    node.status({ fill: 'grey', shape: 'ring', text: formatStatus('No stale ACKs') });\n    return null;\n}\n\nnode.status({\n    fill: 'yellow',\n    shape: 'dot',\n    text: formatStatus(`Force-archiving ${staleEntries.length} stale`)\n});\nnode.warn(`ACK TTL SWEEPER: found ${staleEntries.length} entries past timeout; force-archiving`);\n\n// Emit one message per stale entry, same shape as ACK Handler's archival output\nfor (const { message_id, entry, age } of staleEntries) {\n    const ageHours = Math.floor(age / (60 * 60 * 1000));\n    node.warn(`  - ${message_id} (UID ${entry.uid}, age ${ageHours}h, label ${entry.gmail_label})`);\n\n    // Remove from pending map\n    delete pending[message_id];\n\n    // Emit to Archive Message\n    node.send({\n        payload: {\n            uid: entry.uid,\n            gmail_label: entry.gmail_label,\n            message_id,\n            consumer: 'ack_ttl_sweeper',\n            ack_status: 'ttl_forced'\n        }\n    });\n}\n\nflow.set('imap_pending_ack', pending);\nreturn null;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 310,
+        "y": 420,
+        "wires": [
+            [
+                "7c7aaae4a17ff05b"
+            ]
+        ]
+    },
+    {
+        "id": "7c7aaae4a17ff05b",
+        "type": "link out",
+        "z": "utility-email-ingress",
+        "g": "acd5d8fdcf53f061",
+        "name": "Archive",
+        "mode": "link",
+        "links": [
+            "a6d62ed737e628fe"
+        ],
+        "x": 480,
+        "y": 420,
+        "wires": [],
+        "l": true
+    },
+    {
+        "id": "6f0843d6b1f903f7",
+        "type": "cronplus",
+        "z": "utility-email-ingress",
+        "g": "acd5d8fdcf53f061",
+        "name": "Dedupe TTL",
+        "outputField": "payload",
+        "timeZone": "",
+        "storeName": "",
+        "commandResponseMsgOutput": "output2",
+        "defaultLocation": "",
+        "defaultLocationType": "default",
+        "outputs": 2,
+        "options": [
+            {
+                "name": "Every Hour",
+                "topic": "every-hour",
+                "payloadType": "default",
+                "payload": "",
+                "expressionType": "cron",
+                "expression": "0 0 * * * ? *",
+                "location": "",
+                "offset": "0",
+                "solarType": "all",
+                "solarEvents": "sunrise,sunset"
+            }
+        ],
+        "x": 150,
+        "y": 480,
+        "wires": [
+            [
+                "f834db3352c1e294"
+            ],
+            []
+        ]
+    },
+    {
+        "id": "f834db3352c1e294",
+        "type": "function",
+        "z": "utility-email-ingress",
+        "g": "acd5d8fdcf53f061",
+        "name": "Sweep",
+        "func": "const formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\nconst DEDUP_TTL_MS = 24 * 60 * 60 * 1000; // TODO: read from config\n\nconst allKeys = flow.keys();\nconst now = Date.now();\n\nlet scanned = 0;\nlet removed = 0;\n\nfor (const key of allKeys) {\n    if (!key.startsWith('imap_seen_')) continue;\n    scanned++;\n\n    const entry = flow.get(key);\n    if (!entry || !entry.seen_at) {\n        // Malformed entry; remove it\n        flow.set(key, undefined);\n        removed++;\n        continue;\n    }\n\n    const age = now - entry.seen_at;\n    if (age > DEDUP_TTL_MS) {\n        flow.set(key, undefined);\n        removed++;\n    }\n}\n\nif (scanned === 0) {\n    node.status({ fill: 'grey', shape: 'ring', text: formatStatus('No dedup entries') });\n    return null;\n}\n\nnode.status({\n    fill: 'green',\n    shape: 'dot',\n    text: formatStatus(`Scanned ${scanned}, removed ${removed}`)\n});\n\nif (removed > 0) {\n    node.warn(`DEDUP TTL SWEEPER: scanned ${scanned} entries, removed ${removed} expired`);\n}\n\nreturn null;",
+        "outputs": 0,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 330,
+        "y": 480,
+        "wires": []
+    },
+    {
+        "id": "b075a8e1f165473d",
+        "type": "cronplus",
+        "z": "utility-email-ingress",
+        "g": "acd5d8fdcf53f061",
+        "name": "Retained TTL",
+        "outputField": "payload",
+        "timeZone": "",
+        "storeName": "",
+        "commandResponseMsgOutput": "output2",
+        "defaultLocation": "",
+        "defaultLocationType": "default",
+        "outputs": 2,
+        "options": [
+            {
+                "name": "Every Hour",
+                "topic": "every-hour",
+                "payloadType": "default",
+                "payload": "",
+                "expressionType": "cron",
+                "expression": "0 0 * * * ? *",
+                "location": "",
+                "offset": "0",
+                "solarType": "all",
+                "solarEvents": "sunrise,sunset"
+            }
+        ],
+        "x": 160,
         "y": 540,
+        "wires": [
+            [
+                "02f1db2ad645f752"
+            ],
+            []
+        ]
+    },
+    {
+        "id": "02f1db2ad645f752",
+        "type": "function",
+        "z": "utility-email-ingress",
+        "g": "acd5d8fdcf53f061",
+        "name": "Sweep",
+        "func": "const { ImapFlow } = imapflowPkg;\nconst formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\nconst PROCESSED_LABEL = 'Highland/Processed';\nconst TRASH_FOLDER = '[Gmail]/Trash';\nconst RETENTION_DAYS = 14; // TODO: read from config\nconst RETENTION_MS = RETENTION_DAYS * 24 * 60 * 60 * 1000;\n\n// Guard: prevent stacking\nif (flow.get('retention_sweep_running', 'volatile')) {\n    node.warn('Retention sweep already in progress; skipping this trigger');\n    node.status({ fill: 'yellow', shape: 'ring', text: formatStatus('Already running') });\n    return null;\n}\n\nconst creds = global.get('config')?.secrets?.gmail;\nif (!creds?.account || !creds?.app_password) {\n    node.warn('Retention sweeper: no Gmail credentials, skipping');\n    node.status({ fill: 'red', shape: 'ring', text: formatStatus('No creds') });\n    return null;\n}\n\nflow.set('retention_sweep_running', true, 'volatile');\nnode.status({ fill: 'yellow', shape: 'ring', text: formatStatus('Opening connection...') });\n\n(async () => {\n    // Open a dedicated short-lived connection. The main flow's client is\n    // busy IDLE-locked on All Mail and can't service this request.\n    const client = new ImapFlow({\n        host: 'imap.gmail.com',\n        port: 993,\n        secure: true,\n        auth: {\n            user: creds.account,\n            pass: creds.app_password.replace(/\\s+/g, '')\n        },\n        logger: false\n    });\n\n    let lock = null;\n    try {\n        await client.connect();\n        node.status({ fill: 'yellow', shape: 'ring', text: formatStatus('Scanning Processed...') });\n\n        lock = await client.getMailboxLock(PROCESSED_LABEL);\n\n        const cutoff = new Date(Date.now() - RETENTION_MS);\n        const uids = await client.search({ before: cutoff }, { uid: true });\n\n        if (!uids || uids.length === 0) {\n            node.status({\n                fill: 'green',\n                shape: 'dot',\n                text: formatStatus(`Nothing to purge (<${RETENTION_DAYS}d)`)\n            });\n            return;\n        }\n\n        node.warn(`RETENTION SWEEPER: moving ${uids.length} messages older than ${RETENTION_DAYS}d to Trash`);\n\n        await client.messageMove(uids, TRASH_FOLDER, { uid: true });\n\n        node.status({\n            fill: 'green',\n            shape: 'dot',\n            text: formatStatus(`Moved ${uids.length} to Trash`)\n        });\n        node.warn(`RETENTION SWEEPER: moved ${uids.length} messages to ${TRASH_FOLDER}`);\n    } catch (err) {\n        // Silence shutdown-triggered errors; warn only on real failures\n        const isShutdownError = err.message && (\n            err.message.includes('Connection not available') ||\n            err.message.includes('Connection closed')\n        );\n\n        if (isShutdownError) {\n            node.status({ fill: 'grey', shape: 'ring', text: formatStatus('Aborted (connection closed)') });\n        } else {\n            node.status({\n                fill: 'red',\n                shape: 'ring',\n                text: formatStatus(`Retention failed: ${err.message}`)\n            });\n            node.warn(`Retention sweeper error: ${err.message}`);\n        }\n    } finally {\n        if (lock) {\n            try { lock.release(); } catch (_) {}\n        }\n        try {\n            await client.logout();\n        } catch (_) {\n            // Logout errors on a connection we're already done with are not interesting\n        }\n        flow.set('retention_sweep_running', false, 'volatile');\n    }\n})();\n\nreturn null;",
+        "outputs": 0,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [
+            {
+                "var": "imapflowPkg",
+                "module": "imapflow"
+            }
+        ],
+        "x": 350,
+        "y": 540,
+        "wires": []
+    },
+    {
+        "id": "a724400d651d7dda",
+        "type": "mqtt out",
+        "z": "utility-email-ingress",
+        "g": "14fa5af5ee89f3c7",
+        "name": "Notify",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "4cefa2ad2d8b462e",
+        "x": 570,
+        "y": 120,
         "wires": []
     },
     {
@@ -553,5 +817,13 @@
         "willMsg": {},
         "userProps": "",
         "sessionExpiry": ""
+    },
+    {
+        "id": "69639d760a53a437",
+        "type": "global-config",
+        "env": [],
+        "modules": {
+            "node-red-contrib-cron-plus": "2.2.4"
+        }
     }
 ]

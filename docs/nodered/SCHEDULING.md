@@ -41,6 +41,8 @@ Schedex coordinates pulled from `config.secrets.location` (lat/lon). All 7 days 
 
 **System Events** — CronPlus nodes for deterministic task triggers with limited consumers. Uses `node-red-contrib-cron-plus` (6-field cron: second minute hour day month weekday). Each node wires to a `Prepare Event` function → MQTT out. Sets `node.status()` on each fire for editor visibility.
 
+Per the **CronPlus Two-Output Convention** (see Implementation Notes), each System Events CronPlus node is configured with two outputs: output 1 carries scheduled triggers (wired to the handler), output 2 carries command responses (wired to a catch-all sink or left unwired).
+
 | Task | Expression | Topic | QoS |
 |------|-----------|-------|-----|
 | `Backup Daily` | `0 15 3 * * *` (3:15 AM daily) | `highland/event/scheduler/backup_daily` | 2 |
@@ -112,6 +114,24 @@ This is a push model, not polling. The retained state delivers once on subscript
 - System Events use `node-red-contrib-cron-plus` 6-field format: `"s m h d M wd"` — e.g. `"0 15 3 * * *"` for 3:15:00 AM daily
 - **Fixed vs System Events distinction:** Fixed Events (`midnight`) are general-purpose signals for any interested flow. System Events (`backup_daily`) are task triggers with a specific, limited set of consumers; named after the task rather than the time.
 
+### CronPlus Two-Output Convention
+
+**Any CronPlus node used as an event source in Highland flows must be configured with two outputs**, with command responses routed to the second output. Without this, the handler downstream of output 1 receives both scheduled triggers *and* lifecycle status messages (sent on deploy, on schedule changes, on node start/stop), causing the handler to fire spuriously on deploy.
+
+**Configuration:**
+- `commandResponseMsgOutput`: `output2`
+- `outputs`: `2`
+- Output 1: scheduled triggers — wire to the handler
+- Output 2: command responses / status — leave unwired, or wire to a diagnostic debug node
+
+The two-output configuration is self-enforcing: only scheduled triggers reach output 1, so the handler downstream does not need a `msg.scheduledEvent !== true` guard — the config already ensures nothing else can arrive. Adding a guard on top is actively counterproductive because it blocks manual `node.send` from CronPlus's inject-like button, which is useful for testing.
+
+(A guard on the handler would only be appropriate in a single-output configuration where commands and triggers share an output and must be separated in code. Not the Highland pattern.)
+
+**Why this matters:** The symptom of a misconfigured CronPlus node (single output carrying both kinds of messages) is that the handler fires on deploy, which looks like a "fires immediately" scheduling bug but is actually a status message being mis-dispatched. Discovered and diagnosed on 2026-04-22 during Email Ingress sweeper development.
+
+**Retrofit note:** The existing CronPlus nodes in this flow (`Backup Daily`, `Registry Refresh`) predate this convention and are currently configured with a single output. They should be migrated to the two-output pattern during the next touch. The impact is limited — Registry Refresh fires every 15 minutes, so the spurious deploy-time fire is indistinguishable from a normal schedule fire; Backup Daily fires at 3:15 AM, so the issue is only observable on a deploy near that time. Low-severity, but worth cleaning up for consistency. Tracked repo-wide in issue #50.
+
 ---
 
-*Last Updated: 2026-04-03*
+*Last Updated: 2026-04-22*

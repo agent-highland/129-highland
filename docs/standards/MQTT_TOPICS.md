@@ -1096,7 +1096,7 @@ The topic is derived from the Gmail label by stripping `Highland/`, lowercasing,
 
 `status` values: `"ok"` | `"rejected"` | `"parse_error"`. See `subsystems/EMAIL_INGRESS.md § ACK` for semantics.
 
-**`highland/status/email_ingress/health`** ← RETAINED. See Status / Health section below.
+> **Health topic deferred.** `highland/status/email_ingress/health` was planned but deferred on 2026-04-22 — no current consumer (Healthchecks.io uses HTTP pings, not MQTT; no dashboard consumer identified; the operator-facing failure signal for this flow is direct notification, not retained health). See `subsystems/EMAIL_INGRESS.md § Health` for the deferral rationale.
 
 ---
 
@@ -1480,24 +1480,9 @@ HA audit payload (last backup older than 26 hours):
 
 **`highland/status/{service}/health`** ← RETAINED — Detailed health snapshot. `status` values: `"healthy"` | `"degraded"` | `"unhealthy"`
 
-**Monitored services:** `mqtt` | `z2m` | `zwave` | `ha` | `node_red` | `email_ingress`
+**Monitored services:** `mqtt` | `z2m` | `zwave` | `ha` | `node_red`
 
-Specific notes on `email_ingress`:
-
-```json
-{
-  "status": "healthy",
-  "imap_connection": "connected",
-  "connected_at": "2026-04-22T07:20:00-04:00",
-  "watching_folder": "[Gmail]/All Mail",
-  "messages_in_flight": 0,
-  "stale_messages": 0,
-  "last_error": null,
-  "timestamp": "2026-04-22T07:20:00-04:00"
-}
-```
-
-Published on a periodic interval (60s) and on significant state changes. Degraded: messages past ACK TTL, repeated parse_error statuses, recent but recovered IMAP errors. Unhealthy: IMAP auth failure, connection closed and failing to re-establish, no new events in an unexpectedly long window.
+> **`email_ingress` health topic deferred** (2026-04-22). A retained health topic for Email Ingress was originally planned but deferred pending a real consumer. The operator-facing failure signal for that flow is direct notification instead. See `subsystems/EMAIL_INGRESS.md § Health` for rationale.
 
 ---
 
