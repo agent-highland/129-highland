@@ -20,7 +20,7 @@
             "2a862225c1fc2389"
         ],
         "x": 54,
-        "y": 219,
+        "y": 339,
         "w": 432,
         "h": 82
     },
@@ -57,12 +57,14 @@
         },
         "nodes": [
             "ad2efd39b393cb9c",
-            "35bbbb9283ea5e80"
+            "35bbbb9283ea5e80",
+            "3a6f18601bdcf1eb",
+            "9f07473dacb0ced4"
         ],
         "x": 54,
-        "y": 459,
-        "w": 352,
-        "h": 82
+        "y": 579,
+        "w": 532,
+        "h": 142
     },
     {
         "id": "5fe8ffe3145c6a25",
@@ -78,8 +80,26 @@
             "888b530227258ecc"
         ],
         "x": 54,
-        "y": 339,
+        "y": 459,
         "w": 612,
+        "h": 82
+    },
+    {
+        "id": "cd6f4e0855bb853a",
+        "type": "group",
+        "z": "utility-weather-alerts",
+        "name": "Watchdog",
+        "style": {
+            "label": true
+        },
+        "nodes": [
+            "aa90f6742aa20dc4",
+            "c93c5664f514fc97",
+            "1bda7f7e966f57b6"
+        ],
+        "x": 54,
+        "y": 219,
+        "w": 592,
         "h": 82
     },
     {
@@ -105,7 +125,7 @@
         "payload": "",
         "payloadType": "date",
         "x": 190,
-        "y": 260,
+        "y": 380,
         "wires": [
             [
                 "2a862225c1fc2389"
@@ -123,7 +143,7 @@
             "cc34ec182e1fc0ca"
         ],
         "x": 400,
-        "y": 260,
+        "y": 380,
         "wires": [],
         "l": true
     },
@@ -136,10 +156,10 @@
         "scope": null,
         "uncaught": false,
         "x": 140,
-        "y": 500,
+        "y": 620,
         "wires": [
             [
-                "35bbbb9283ea5e80"
+                "3a6f18601bdcf1eb"
             ]
         ]
     },
@@ -213,7 +233,7 @@
         "z": "utility-weather-alerts",
         "g": "806e9ecc0ebe893f",
         "name": "Process Alerts",
-        "func": "const formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\nconst location = global.get('config')?.location;\nconst lat = location?.latitude;\nconst lon = location?.longitude;\n\nif (msg.statusCode !== 200) {\n    node.error(`Alerts fetch failed: ${msg.statusCode}`, msg);\n    return null;\n}\n\nconst now = new Date();\n\n// Pre-filter: remove alerts NWS is still returning but have already expired\nconst incoming = (msg.payload.features || []).filter(f => new Date(f.properties.expires) > now);\n\n// --- Three-tier deduplication ---\n\n// Tier 1: messageType Update + references (formal NWS supersession)\nconst supersededIds = new Set();\nfor (const feature of incoming) {\n    const p = feature.properties;\n    if (p.messageType === 'Update' && Array.isArray(p.references) && p.references.length > 0) {\n        for (const ref of p.references) {\n            const refId = typeof ref === 'string' ? ref : (ref['@id'] ?? ref.identifier);\n            if (refId) supersededIds.add(refId);\n        }\n    }\n}\nconst tier1 = incoming.filter(f => !supersededIds.has(f.properties.id));\n\n// Tier 2: VTEC deduplication (watches, warnings, advisories)\nfunction vtecParts(vtecStr) {\n    const match = vtecStr.match(/\\/\\w+\\.(\\w{4})\\.(\\w{2})\\.(\\w)\\.(\\d{4})\\./);\n    if (!match) return null;\n    const [, office, phenom, sig, num] = match;\n    return { office, phenom, sig, num, code: phenom + sig };\n}\n\nfunction vtecKey(vtecStr) {\n    const parts = vtecParts(vtecStr);\n    if (!parts) return null;\n    return `${parts.office}.${parts.phenom}.${parts.sig}.${parts.num}`;\n}\n\nfunction alertCorrelationId(feature) {\n    const vtecParam = feature.properties.parameters?.VTEC?.[0];\n    if (vtecParam) {\n        const key = vtecKey(vtecParam);\n        if (key) return 'weather_alert_' + key.toLowerCase().replace(/\\./g, '_');\n    }\n    const evt    = feature.properties.event || '';\n    const sender = feature.properties.senderName || '';\n    const sanitized = (evt + '_' + sender).toLowerCase().replace(/[^a-z0-9]+/g, '_');\n    return 'weather_alert_' + sanitized;\n}\n\nfunction nwsCode(feature) {\n    const vtecParam = feature.properties.parameters?.VTEC?.[0];\n    if (vtecParam) {\n        const parts = vtecParts(vtecParam);\n        if (parts) return parts.code;\n    }\n    return '';\n}\n\nconst vtecGroups = {};\nconst nonVtec = [];\nfor (const feature of tier1) {\n    const vtecParam = feature.properties.parameters?.VTEC?.[0];\n    if (vtecParam) {\n        const key = vtecKey(vtecParam);\n        if (key) {\n            if (!vtecGroups[key] || new Date(feature.properties.sent) > new Date(vtecGroups[key].properties.sent)) {\n                vtecGroups[key] = feature;\n            }\n            continue;\n        }\n    }\n    nonVtec.push(feature);\n}\n\n// Tier 3: Heuristic deduplication for non-VTEC products (e.g. SPS)\nfunction windowsOverlap(a, b) {\n    const aEff = new Date(a.properties.effective);\n    const aExp = new Date(a.properties.expires);\n    const bEff = new Date(b.properties.effective);\n    const bExp = new Date(b.properties.expires);\n    return aEff < bExp && bEff < aExp;\n}\n\nconst heuristicGroups = {};\nfor (const feature of nonVtec) {\n    const p = feature.properties;\n    const key = `${p.event}|${p.senderName}|${p.areaDesc}`;\n    if (!heuristicGroups[key]) heuristicGroups[key] = [];\n    heuristicGroups[key].push(feature);\n}\n\nconst tier3 = [];\nfor (const group of Object.values(heuristicGroups)) {\n    if (group.length === 1) { tier3.push(group[0]); continue; }\n    const hasOverlap = group.some((a, i) => group.slice(i + 1).some(b => windowsOverlap(a, b)));\n    if (hasOverlap) {\n        const newest = group.reduce((best, f) =>\n            new Date(f.properties.sent) > new Date(best.properties.sent) ? f : best\n        );\n        tier3.push(newest);\n    } else {\n        tier3.push(...group);\n    }\n}\n\nconst deduped = [...Object.values(vtecGroups), ...tier3];\n// --- End deduplication ---\n\nconst known = flow.get('known_alerts') || {};\n\nconst severityMap = {\n    'Extreme': 'critical',\n    'Severe':  'high',\n    'Moderate':'medium',\n    'Minor':   'low'\n};\n\nconst events = [];\nconst updatedKnown = {};\n\n// Process active alerts\nfor (const feature of deduped) {\n    const p = feature.properties;\n    const id = p.id;\n    const existing = known[id];\n    const correlationId = alertCorrelationId(feature);\n\n    updatedKnown[id] = {\n        ID:            id,\n        Event:         p.event        || '',\n        Headline:      p.headline     || '',\n        Severity:      p.severity     || '',\n        Certainty:     p.certainty    || '',\n        Urgency:       p.urgency      || '',\n        Sent:          p.sent         || '',\n        Onset:         p.onset        || '',\n        Expires:       p.expires      || '',\n        Ends:          p.ends         || '',\n        AreasAffected: p.areaDesc     || '',\n        Description:   p.description  || '',\n        Instruction:   p.instruction  || '',\n        URL:           id,\n        NWSCode:       nwsCode(feature),\n        Type:          p.messageType  || '',\n        Status:        p.status       || '',\n        correlation_id: correlationId\n    };\n\n    const eventPayload = {\n        timestamp:             now.toISOString(),\n        source:                'weather_alerts',\n        event:                 p.event,\n        headline:              p.headline,\n        severity:              p.severity,\n        notification_severity: severityMap[p.severity] || 'medium',\n        sent:                  p.sent,\n        expires:               p.expires,\n        ends:                  p.ends,\n        correlation_id:        correlationId,\n        url:                   `https://forecast.weather.gov/MapClick.php?lat=${lat}&lon=${lon}`\n    };\n\n    if (!existing) {\n        events.push({ topic: 'highland/event/weather/alert/new', payload: eventPayload });\n    } else if (existing.Sent !== p.sent) {\n        events.push({ topic: 'highland/event/weather/alert/updated', payload: eventPayload });\n    }\n}\n\n// Fire expired events for anything that didn't survive pre-filter + deduplication\nfor (const [id, data] of Object.entries(known)) {\n    if (!updatedKnown[id]) {\n        events.push({\n            topic: 'highland/event/weather/alert/expired',\n            payload: {\n                timestamp:      now.toISOString(),\n                source:         'weather_alerts',\n                event:          data.Event,\n                headline:       data.Headline,\n                severity:       data.Severity,\n                expires:        data.Expires,\n                ends:           data.Ends,\n                correlation_id: data.correlation_id\n            }\n        });\n    }\n}\n\n// Persist updated known set\nflow.set('known_alerts', updatedKnown);\n\n// Build canonical snake_case array for highland/state/\nconst activeAlertsSnake = Object.values(updatedKnown).map(a => ({\n    event:          a.Event,\n    headline:       a.Headline,\n    severity:       a.Severity,\n    certainty:      a.Certainty,\n    urgency:        a.Urgency,\n    sent:           a.Sent,\n    onset:          a.Onset,\n    expires:        a.Expires,\n    ends:           a.Ends,\n    area_desc:      a.AreasAffected,\n    description:    a.Description,\n    instruction:    a.Instruction,\n    nws_code:       a.NWSCode,\n    type:           a.Type,\n    status:         a.Status,\n    url:            a.URL,\n    correlation_id: a.correlation_id\n}));\n\n// Build PascalCase array for highland/homeassistant/ (NwsAdapter contract)\nconst activeAlertsPascal = Object.values(updatedKnown).map(a => ({\n    ID:            a.ID,\n    Event:         a.Event,\n    Headline:      a.Headline,\n    Severity:      a.Severity,\n    Certainty:     a.Certainty,\n    Urgency:       a.Urgency,\n    Sent:          a.Sent,\n    Onset:         a.Onset,\n    Expires:       a.Expires,\n    Ends:          a.Ends,\n    AreasAffected: a.AreasAffected,\n    Description:   a.Description,\n    Instruction:   a.Instruction,\n    NWSCode:       a.NWSCode,\n    Type:          a.Type,\n    Status:        a.Status,\n    URL:           a.URL\n}));\n\nconst currentCount  = activeAlertsSnake.length;\nconst previousCount = flow.get('last_alert_count') ?? -1;\nif (currentCount !== previousCount) {\n    flow.set('last_alert_count', currentCount);\n}\n\nconst common = {\n    timestamp:   now.toISOString(),\n    source:      'weather_alerts',\n    count:       currentCount,\n    attribution: 'Data provided by Weather.gov'\n};\n\n// Two snapshots: canonical state topic + HA-facing projection\nconst snapshots = [\n    {\n        topic:   'highland/state/weather/alerts',\n        retain:  true,\n        qos:     1,\n        payload: JSON.stringify({ ...common, alerts: activeAlertsSnake })\n    },\n    {\n        topic:   'highland/homeassistant/weather/alerts',\n        retain:  true,\n        qos:     1,\n        payload: JSON.stringify({ ...common, Alerts: activeAlertsPascal })\n    }\n];\n\nnode.status({\n    fill:  currentCount > 0 ? 'yellow' : 'green',\n    shape: currentCount > 0 ? 'ring'   : 'dot',\n    text:  formatStatus(`${currentCount} active alert(s)`)\n});\n\nmsg.snapshots = snapshots;\nmsg.events    = events;\nreturn msg;",
+        "func": "const formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\nconst location = global.get('config')?.location;\nconst lat = location?.latitude;\nconst lon = location?.longitude;\n\nif (msg.error) {\n    return null;\n}\n\nif (msg.statusCode !== 200) {\n    node.error(`Alerts fetch failed: ${msg.statusCode}`, msg);\n    return null;\n}\n\nconst now = new Date();\n\n// Pre-filter: remove alerts NWS is still returning but have already expired\nconst incoming = (msg.payload.features || []).filter(f => new Date(f.properties.expires) > now);\n\n// --- Three-tier deduplication ---\n\n// Tier 1: messageType Update + references (formal NWS supersession)\nconst supersededIds = new Set();\nfor (const feature of incoming) {\n    const p = feature.properties;\n    if (p.messageType === 'Update' && Array.isArray(p.references) && p.references.length > 0) {\n        for (const ref of p.references) {\n            const refId = typeof ref === 'string' ? ref : (ref['@id'] ?? ref.identifier);\n            if (refId) supersededIds.add(refId);\n        }\n    }\n}\nconst tier1 = incoming.filter(f => !supersededIds.has(f.properties.id));\n\n// Tier 2: VTEC deduplication (watches, warnings, advisories)\nfunction vtecParts(vtecStr) {\n    const match = vtecStr.match(/\\/\\w+\\.(\\w{4})\\.(\\w{2})\\.(\\w)\\.(\\d{4})\\./);\n    if (!match) return null;\n    const [, office, phenom, sig, num] = match;\n    return { office, phenom, sig, num, code: phenom + sig };\n}\n\nfunction vtecKey(vtecStr) {\n    const parts = vtecParts(vtecStr);\n    if (!parts) return null;\n    return `${parts.office}.${parts.phenom}.${parts.sig}.${parts.num}`;\n}\n\nfunction alertCorrelationId(feature) {\n    const vtecParam = feature.properties.parameters?.VTEC?.[0];\n    if (vtecParam) {\n        const key = vtecKey(vtecParam);\n        if (key) return 'weather_alert_' + key.toLowerCase().replace(/\\./g, '_');\n    }\n    const evt    = feature.properties.event || '';\n    const sender = feature.properties.senderName || '';\n    const sanitized = (evt + '_' + sender).toLowerCase().replace(/[^a-z0-9]+/g, '_');\n    return 'weather_alert_' + sanitized;\n}\n\nfunction nwsCode(feature) {\n    const vtecParam = feature.properties.parameters?.VTEC?.[0];\n    if (vtecParam) {\n        const parts = vtecParts(vtecParam);\n        if (parts) return parts.code;\n    }\n    return '';\n}\n\nconst vtecGroups = {};\nconst nonVtec = [];\nfor (const feature of tier1) {\n    const vtecParam = feature.properties.parameters?.VTEC?.[0];\n    if (vtecParam) {\n        const key = vtecKey(vtecParam);\n        if (key) {\n            if (!vtecGroups[key] || new Date(feature.properties.sent) > new Date(vtecGroups[key].properties.sent)) {\n                vtecGroups[key] = feature;\n            }\n            continue;\n        }\n    }\n    nonVtec.push(feature);\n}\n\n// Tier 3: Heuristic deduplication for non-VTEC products (e.g. SPS)\nfunction windowsOverlap(a, b) {\n    const aEff = new Date(a.properties.effective);\n    const aExp = new Date(a.properties.expires);\n    const bEff = new Date(b.properties.effective);\n    const bExp = new Date(b.properties.expires);\n    return aEff < bExp && bEff < aExp;\n}\n\nconst heuristicGroups = {};\nfor (const feature of nonVtec) {\n    const p = feature.properties;\n    const key = `${p.event}|${p.senderName}|${p.areaDesc}`;\n    if (!heuristicGroups[key]) heuristicGroups[key] = [];\n    heuristicGroups[key].push(feature);\n}\n\nconst tier3 = [];\nfor (const group of Object.values(heuristicGroups)) {\n    if (group.length === 1) { tier3.push(group[0]); continue; }\n    const hasOverlap = group.some((a, i) => group.slice(i + 1).some(b => windowsOverlap(a, b)));\n    if (hasOverlap) {\n        const newest = group.reduce((best, f) =>\n            new Date(f.properties.sent) > new Date(best.properties.sent) ? f : best\n        );\n        tier3.push(newest);\n    } else {\n        tier3.push(...group);\n    }\n}\n\nconst deduped = [...Object.values(vtecGroups), ...tier3];\n// --- End deduplication ---\n\nconst known = flow.get('known_alerts') || {};\n\nconst severityMap = {\n    'Extreme': 'critical',\n    'Severe':  'high',\n    'Moderate':'medium',\n    'Minor':   'low'\n};\n\nconst events = [];\nconst updatedKnown = {};\n\n// Process active alerts\nfor (const feature of deduped) {\n    const p = feature.properties;\n    const id = p.id;\n    const existing = known[id];\n    const correlationId = alertCorrelationId(feature);\n\n    updatedKnown[id] = {\n        ID:            id,\n        Event:         p.event        || '',\n        Headline:      p.headline     || '',\n        Severity:      p.severity     || '',\n        Certainty:     p.certainty    || '',\n        Urgency:       p.urgency      || '',\n        Sent:          p.sent         || '',\n        Onset:         p.onset        || '',\n        Expires:       p.expires      || '',\n        Ends:          p.ends         || '',\n        AreasAffected: p.areaDesc     || '',\n        Description:   p.description  || '',\n        Instruction:   p.instruction  || '',\n        URL:           id,\n        NWSCode:       nwsCode(feature),\n        Type:          p.messageType  || '',\n        Status:        p.status       || '',\n        correlation_id: correlationId\n    };\n\n    const eventPayload = {\n        timestamp:             now.toISOString(),\n        source:                'weather_alerts',\n        event:                 p.event,\n        headline:              p.headline,\n        severity:              p.severity,\n        notification_severity: severityMap[p.severity] || 'medium',\n        sent:                  p.sent,\n        expires:               p.expires,\n        ends:                  p.ends,\n        correlation_id:        correlationId,\n        url:                   `https://forecast.weather.gov/MapClick.php?lat=${lat}&lon=${lon}`\n    };\n\n    if (!existing) {\n        events.push({ topic: 'highland/event/weather/alert/new', payload: eventPayload });\n    } else if (existing.Sent !== p.sent) {\n        events.push({ topic: 'highland/event/weather/alert/updated', payload: eventPayload });\n    }\n}\n\n// Fire expired events for anything that didn't survive pre-filter + deduplication\nfor (const [id, data] of Object.entries(known)) {\n    if (!updatedKnown[id]) {\n        events.push({\n            topic: 'highland/event/weather/alert/expired',\n            payload: {\n                timestamp:      now.toISOString(),\n                source:         'weather_alerts',\n                event:          data.Event,\n                headline:       data.Headline,\n                severity:       data.Severity,\n                expires:        data.Expires,\n                ends:           data.Ends,\n                correlation_id: data.correlation_id\n            }\n        });\n    }\n}\n\n// Persist updated known set\nflow.set('known_alerts', updatedKnown);\nflow.set('last_successful_poll', now.toISOString());\n\n// Build canonical snake_case array for highland/state/\nconst activeAlertsSnake = Object.values(updatedKnown).map(a => ({\n    event:          a.Event,\n    headline:       a.Headline,\n    severity:       a.Severity,\n    certainty:      a.Certainty,\n    urgency:        a.Urgency,\n    sent:           a.Sent,\n    onset:          a.Onset,\n    expires:        a.Expires,\n    ends:           a.Ends,\n    area_desc:      a.AreasAffected,\n    description:    a.Description,\n    instruction:    a.Instruction,\n    nws_code:       a.NWSCode,\n    type:           a.Type,\n    status:         a.Status,\n    url:            a.URL,\n    correlation_id: a.correlation_id\n}));\n\n// Build PascalCase array for highland/homeassistant/ (NwsAdapter contract)\nconst activeAlertsPascal = Object.values(updatedKnown).map(a => ({\n    ID:            a.ID,\n    Event:         a.Event,\n    Headline:      a.Headline,\n    Severity:      a.Severity,\n    Certainty:     a.Certainty,\n    Urgency:       a.Urgency,\n    Sent:          a.Sent,\n    Onset:         a.Onset,\n    Expires:       a.Expires,\n    Ends:          a.Ends,\n    AreasAffected: a.AreasAffected,\n    Description:   a.Description,\n    Instruction:   a.Instruction,\n    NWSCode:       a.NWSCode,\n    Type:          a.Type,\n    Status:        a.Status,\n    URL:           a.URL\n}));\n\nconst currentCount  = activeAlertsSnake.length;\nconst previousCount = flow.get('last_alert_count') ?? -1;\nif (currentCount !== previousCount) {\n    flow.set('last_alert_count', currentCount);\n}\n\nconst common = {\n    timestamp:   now.toISOString(),\n    source:      'weather_alerts',\n    count:       currentCount,\n    attribution: 'Data provided by Weather.gov'\n};\n\n// Two snapshots: canonical state topic + HA-facing projection\nconst snapshots = [\n    {\n        topic:   'highland/state/weather/alerts',\n        retain:  true,\n        qos:     1,\n        payload: JSON.stringify({ ...common, alerts: activeAlertsSnake })\n    },\n    {\n        topic:   'highland/homeassistant/weather/alerts',\n        retain:  true,\n        qos:     1,\n        payload: JSON.stringify({ ...common, Alerts: activeAlertsPascal })\n    }\n];\n\nnode.status({\n    fill:  currentCount > 0 ? 'yellow' : 'green',\n    shape: currentCount > 0 ? 'ring'   : 'dot',\n    text:  formatStatus(`${currentCount} active alert(s)`)\n});\n\nmsg.snapshots = snapshots;\nmsg.events    = events;\nreturn msg;",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,
@@ -283,8 +303,8 @@
         "targetType": "full",
         "statusVal": "",
         "statusType": "auto",
-        "x": 310,
-        "y": 500,
+        "x": 490,
+        "y": 680,
         "wires": []
     },
     {
@@ -341,7 +361,7 @@
         "finalize": "",
         "libs": [],
         "x": 380,
-        "y": 380,
+        "y": 500,
         "wires": [
             [
                 "888b530227258ecc"
@@ -371,7 +391,7 @@
         "payload": "",
         "payloadType": "date",
         "x": 170,
-        "y": 380,
+        "y": 500,
         "wires": [
             [
                 "83310d17313f998b"
@@ -394,7 +414,126 @@
         "expiry": "",
         "broker": "4cefa2ad2d8b462e",
         "x": 580,
-        "y": 380,
+        "y": 500,
+        "wires": []
+    },
+    {
+        "id": "3a6f18601bdcf1eb",
+        "type": "function",
+        "z": "utility-weather-alerts",
+        "g": "d95945a45dda81f5",
+        "name": "Log Error",
+        "func": "const lastSuccess = flow.get('last_successful_poll');\nconst ageMinutes = lastSuccess\n    ? Math.round((Date.now() - new Date(lastSuccess).getTime()) / 60000)\n    : null;\n\nconst error = msg.error || {};\nconst code = error.code || msg.statusCode || 'unknown';\n\n// Transient codes: log at WARN. Unexpected codes: log at ERROR.\nconst transient = ['EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 503, 502, 504, 429];\nconst level = transient.includes(code) ? 'WARN' : 'ERROR';\n\nnode.send([\n    {\n        topic: 'highland/event/log',\n        retain: false,\n        payload: JSON.stringify({\n            timestamp: new Date().toISOString(),\n            system: 'node_red',\n            source: 'weather_alerts',\n            level,\n            message: `NWS alerts request failed: ${code}`,\n            context: {\n                code,\n                message: error.message || String(msg.payload).slice(0, 200),\n                last_successful_poll: lastSuccess || null,\n                age_minutes: ageMinutes\n            }\n        })\n    },\n    msg  // pass through to Debug Output\n]);",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 320,
+        "y": 620,
+        "wires": [
+            [
+                "9f07473dacb0ced4"
+            ],
+            [
+                "35bbbb9283ea5e80"
+            ]
+        ]
+    },
+    {
+        "id": "9f07473dacb0ced4",
+        "type": "mqtt out",
+        "z": "utility-weather-alerts",
+        "g": "d95945a45dda81f5",
+        "name": "Publish",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "4cefa2ad2d8b462e",
+        "x": 500,
+        "y": 620,
+        "wires": []
+    },
+    {
+        "id": "aa90f6742aa20dc4",
+        "type": "cronplus",
+        "z": "utility-weather-alerts",
+        "g": "cd6f4e0855bb853a",
+        "name": "Poll",
+        "outputField": "payload",
+        "timeZone": "",
+        "storeName": "",
+        "commandResponseMsgOutput": "output2",
+        "defaultLocation": "",
+        "defaultLocationType": "default",
+        "outputs": 2,
+        "options": [
+            {
+                "name": "Every Five Minutes",
+                "topic": "every-five-minutes",
+                "payloadType": "default",
+                "payload": "",
+                "expressionType": "cron",
+                "expression": "0 */5 * * * *",
+                "location": "",
+                "offset": "0",
+                "solarType": "all",
+                "solarEvents": "sunrise,sunset"
+            }
+        ],
+        "x": 150,
+        "y": 260,
+        "wires": [
+            [
+                "c93c5664f514fc97"
+            ],
+            []
+        ]
+    },
+    {
+        "id": "c93c5664f514fc97",
+        "type": "function",
+        "z": "utility-weather-alerts",
+        "g": "cd6f4e0855bb853a",
+        "name": "Check Staleness",
+        "func": "const lastSuccess = flow.get('last_successful_poll');\nconst THRESHOLD_MINUTES = 3;\n\nif (!lastSuccess) return null; // not yet initialized\n\nconst ageMinutes = Math.round((Date.now() - new Date(lastSuccess).getTime()) / 60000);\nconst status     = ageMinutes > THRESHOLD_MINUTES ? 'degraded' : 'ok';\n\nnode.status({\n    fill:  status === 'ok' ? 'green' : 'red',\n    shape: 'dot',\n    text:  status === 'ok' ? `Last poll ${ageMinutes}m ago` : `STALE — ${ageMinutes}m ago`\n});\n\nmsg.topic   = 'highland/status/weather_alerts/health';\nmsg.retain  = true;\nmsg.payload = JSON.stringify({\n    timestamp:            new Date().toISOString(),\n    system:               'node_red',\n    source:               'weather_alerts',\n    status,\n    message:              status === 'ok'\n        ? `NWS alerts polling healthy — last success ${ageMinutes}m ago`\n        : `NWS alerts polling stale — last success ${ageMinutes}m ago`,\n    context: {\n        last_successful_poll: lastSuccess,\n        age_minutes:          ageMinutes,\n        threshold_minutes:    THRESHOLD_MINUTES\n    }\n});\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 350,
+        "y": 260,
+        "wires": [
+            [
+                "1bda7f7e966f57b6"
+            ]
+        ]
+    },
+    {
+        "id": "1bda7f7e966f57b6",
+        "type": "mqtt out",
+        "z": "utility-weather-alerts",
+        "g": "cd6f4e0855bb853a",
+        "name": "Publish",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "4cefa2ad2d8b462e",
+        "x": 560,
+        "y": 260,
         "wires": []
     },
     {
@@ -427,5 +566,13 @@
         "willMsg": {},
         "userProps": "",
         "sessionExpiry": ""
+    },
+    {
+        "id": "695f4398ac34acea",
+        "type": "global-config",
+        "env": [],
+        "modules": {
+            "node-red-contrib-cron-plus": "2.2.4"
+        }
     }
 ]
