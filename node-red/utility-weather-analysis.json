@@ -95,11 +95,12 @@
             "7a081a5703779af7",
             "5eb14c2a747c4439",
             "740881f30d552751",
-            "e04ffc21bb991c5b"
+            "e04ffc21bb991c5b",
+            "5c292b434d3da63a"
         ],
         "x": 54,
         "y": 39,
-        "w": 1132,
+        "w": 1392,
         "h": 142
     },
     {
@@ -172,11 +173,12 @@
             "b6b8e9e579008d7b",
             "55b5f621be1afb52",
             "f71b49b0c0ed6539",
-            "8242604ee0c4be3b"
+            "8242604ee0c4be3b",
+            "f7bf2226f80bc1c2"
         ],
         "x": 54,
         "y": 579,
-        "w": 852,
+        "w": 1012,
         "h": 82
     },
     {
@@ -576,7 +578,7 @@
         "y": 80,
         "wires": [
             [
-                "740881f30d552751"
+                "5c292b434d3da63a"
             ]
         ]
     },
@@ -594,7 +596,7 @@
         "targetType": "msg",
         "statusVal": "",
         "statusType": "auto",
-        "x": 1090,
+        "x": 1350,
         "y": 80,
         "wires": []
     },
@@ -857,7 +859,7 @@
         "type": "cronplus",
         "z": "utility-weather-analysis",
         "g": "dae1ce2bc722b81b",
-        "name": "Every 90 Seconds",
+        "name": "Every Minute",
         "outputField": "payload",
         "timeZone": "",
         "storeName": "",
@@ -867,23 +869,23 @@
         "outputs": 1,
         "options": [
             {
-                "name": "Every 90 Seconds",
-                "topic": "every-90s",
+                "name": "Every Minute",
+                "topic": "every-minute",
                 "payloadType": "default",
                 "payload": "",
                 "expressionType": "cron",
-                "expression": "0/90 * * * * * *",
+                "expression": "0 * * * * *",
                 "location": "",
                 "offset": "0",
                 "solarType": "all",
                 "solarEvents": "sunrise,sunset"
             }
         ],
-        "x": 190,
+        "x": 170,
         "y": 620,
         "wires": [
             [
-                "55b5f621be1afb52"
+                "f7bf2226f80bc1c2"
             ]
         ]
     },
@@ -893,14 +895,14 @@
         "z": "utility-weather-analysis",
         "g": "dae1ce2bc722b81b",
         "name": "Build Request",
-        "func": "const config = global.get('config');\nconst key = config.secrets.open_weather_map.api_key;\nconst lat = config.location.latitude;\nconst lon = config.location.longitude;\n\nmsg.url = `https://api.openweathermap.org/data/3.0/onecall?lat=${lat}&lon=${lon}&exclude=current,daily,alerts&appid=${key}&units=imperial`;\nreturn msg;",
+        "func": "const config = global.get('config');\nconst key = config.secrets.open_weather_map.api_key;\nconst lat = config.location.latitude;\nconst lon = config.location.longitude;\n\nmsg.url = `https://api.openweathermap.org/data/3.0/onecall?lat=${lat}&lon=${lon}&exclude=current,daily,alerts&appid=${key}&units=imperial`;\n\nflow.set('owm_tick_count', 0);\n\nreturn msg;",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 420,
+        "x": 580,
         "y": 620,
         "wires": [
             [
@@ -925,7 +927,7 @@
         "authType": "",
         "senderr": false,
         "headers": [],
-        "x": 630,
+        "x": 790,
         "y": 620,
         "wires": [
             [
@@ -946,7 +948,7 @@
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 820,
+        "x": 980,
         "y": 620,
         "wires": [
             []
@@ -1053,6 +1055,48 @@
         ]
     },
     {
+        "id": "5c292b434d3da63a",
+        "type": "function",
+        "z": "utility-weather-analysis",
+        "g": "4b1b9a8cad6bb5c7",
+        "name": "Set Polling Cadence",
+        "func": "const p = msg.payload;\n\nconst hasThreat   = p.has_threat;\nconst tempestRain = (flow.get('station_precip_type') ?? 'None') !== 'None';\nconst shouldBeActive = hasThreat || tempestRain;\n\nconst newState = shouldBeActive ? 'active' : 'dormant';\nflow.set('owm_poll_state', newState);\n\nconst formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\nnode.status({\n    fill:  newState === 'active' ? 'yellow' : 'green',\n    shape: 'dot',\n    text:  formatStatus(`${newState.toUpperCase()}`)\n});\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1140,
+        "y": 80,
+        "wires": [
+            [
+                "740881f30d552751"
+            ]
+        ]
+    },
+    {
+        "id": "f7bf2226f80bc1c2",
+        "type": "function",
+        "z": "utility-weather-analysis",
+        "g": "dae1ce2bc722b81b",
+        "name": "Rate Limiter",
+        "func": "const state     = flow.get('owm_poll_state') ?? 'active';\nconst tickCount = (flow.get('owm_tick_count') ?? 0) + 1;\nflow.set('owm_tick_count', tickCount);\n\n// ACTIVE: pass every tick (every 1 min)\n// DORMANT: pass every 5th tick (every 5 min)\nconst passThrough = state === 'active' || (tickCount % 5 === 0);\n\nnode.status({\n    fill:  state === 'active' ? 'yellow' : 'green',\n    shape: 'dot',\n    text:  `${state.toUpperCase()} | Tick ${tickCount}`\n});\n\nif (!passThrough)\n{\n    return null;\n}\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 370,
+        "y": 620,
+        "wires": [
+            [
+                "55b5f621be1afb52"
+            ]
+        ]
+    },
+    {
         "id": "4cefa2ad2d8b462e",
         "type": "mqtt-broker",
         "name": "Hub",
@@ -1084,7 +1128,7 @@
         "sessionExpiry": ""
     },
     {
-        "id": "fe74f16778af23ad",
+        "id": "669ae017d1d1989f",
         "type": "global-config",
         "env": [],
         "modules": {
