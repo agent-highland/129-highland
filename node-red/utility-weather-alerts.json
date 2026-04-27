@@ -295,7 +295,7 @@
         "z": "utility-weather-alerts",
         "g": "d95945a45dda81f5",
         "name": "Output",
-        "active": true,
+        "active": false,
         "tosidebar": true,
         "console": false,
         "tostatus": false,
@@ -423,7 +423,7 @@
         "z": "utility-weather-alerts",
         "g": "d95945a45dda81f5",
         "name": "Log Error",
-        "func": "const lastSuccess = flow.get('last_successful_poll');\nconst ageMinutes = lastSuccess\n    ? Math.round((Date.now() - new Date(lastSuccess).getTime()) / 60000)\n    : null;\n\nconst error = msg.error || {};\nconst code = error.code || msg.statusCode || 'unknown';\n\n// Transient codes: log at WARN. Unexpected codes: log at ERROR.\nconst transient = ['EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 503, 502, 504, 429];\nconst level = transient.includes(code) ? 'WARN' : 'ERROR';\n\nnode.send([\n    {\n        topic: 'highland/event/log',\n        retain: false,\n        payload: JSON.stringify({\n            timestamp: new Date().toISOString(),\n            system: 'node_red',\n            source: 'weather_alerts',\n            level,\n            message: `NWS alerts request failed: ${code}`,\n            context: {\n                code,\n                message: error.message || String(msg.payload).slice(0, 200),\n                last_successful_poll: lastSuccess || null,\n                age_minutes: ageMinutes\n            }\n        })\n    },\n    msg  // pass through to Debug Output\n]);",
+        "func": "const lastSuccess = flow.get('last_successful_poll');\nconst ageMinutes = lastSuccess\n    ? Math.round((Date.now() - new Date(lastSuccess).getTime()) / 60000)\n    : null;\n\nconst error = msg.error || {};\nconst code = error.code || msg.statusCode || 'unknown';\n\n// Transient codes: log at WARN. Unexpected codes: log at ERROR.\nconst transient = ['EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 500, 502, 503, 504, 429];\nconst level = transient.includes(code) ? 'WARN' : 'ERROR';\n\nnode.send([\n    {\n        topic: 'highland/event/log',\n        retain: false,\n        payload: JSON.stringify({\n            timestamp: new Date().toISOString(),\n            system: 'node_red',\n            source: 'weather_alerts',\n            level,\n            message: `NWS alerts request failed: ${code}`,\n            context: {\n                code,\n                message: error.message || String(msg.payload).slice(0, 200),\n                last_successful_poll: lastSuccess || null,\n                age_minutes: ageMinutes\n            }\n        })\n    },\n    msg  // pass through to Debug Output\n]);",
         "outputs": 2,
         "timeout": 0,
         "noerr": 0,
@@ -568,7 +568,7 @@
         "sessionExpiry": ""
     },
     {
-        "id": "27e672f88f549778",
+        "id": "18f511e4f9e1a743",
         "type": "global-config",
         "env": [],
         "modules": {
