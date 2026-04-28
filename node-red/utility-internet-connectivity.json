@@ -1,0 +1,437 @@
+[
+    {
+        "id": "utility-internet-connectivity",
+        "type": "tab",
+        "label": "Utility: Internet Connectivity",
+        "disabled": false,
+        "info": "",
+        "env": []
+    },
+    {
+        "id": "5181647e287488d2",
+        "type": "group",
+        "z": "utility-internet-connectivity",
+        "name": "Connectivity Pipeline",
+        "style": {
+            "label": true
+        },
+        "nodes": [
+            "6183c0df74d720d7",
+            "5fe0b6a6f70d5a28",
+            "48838c2709c6e447",
+            "3b70c2c2217f3aa3",
+            "44508b4b18f724ff"
+        ],
+        "x": 54,
+        "y": 39,
+        "w": 912,
+        "h": 82
+    },
+    {
+        "id": "7baf12c22199d087",
+        "type": "group",
+        "z": "utility-internet-connectivity",
+        "name": "Throughput Pipeline",
+        "style": {
+            "label": true
+        },
+        "nodes": [
+            "cf19c3912e220cfe",
+            "0c1389df5d67c1ef",
+            "0aac22f390ebbd0b",
+            "2534a92d896ad71a"
+        ],
+        "x": 54,
+        "y": 159,
+        "w": 712,
+        "h": 82
+    },
+    {
+        "id": "f6b8cf74e7bcfdea",
+        "type": "group",
+        "z": "utility-internet-connectivity",
+        "name": "Error Handling",
+        "style": {
+            "label": true
+        },
+        "nodes": [
+            "44ee0fe81da70ee1",
+            "570b24a3626601cf"
+        ],
+        "x": 54,
+        "y": 399,
+        "w": 352,
+        "h": 82
+    },
+    {
+        "id": "d974bc2d2247af3b",
+        "type": "group",
+        "z": "utility-internet-connectivity",
+        "name": "Home Assistant Discovery",
+        "style": {
+            "label": true
+        },
+        "nodes": [
+            "1f1b2524ab9a763d",
+            "344aea456a0205b2",
+            "ff30e8e1a9e770fe"
+        ],
+        "x": 54,
+        "y": 279,
+        "w": 612,
+        "h": 82
+    },
+    {
+        "id": "6183c0df74d720d7",
+        "type": "function",
+        "z": "utility-internet-connectivity",
+        "g": "5181647e287488d2",
+        "name": "Build Requests",
+        "func": "clear();\n\nlet hosts = [\n    '8.8.8.8',\n    '1.1.1.1',\n    '208.67.222.222',\n];\n\nping(hosts);\n\nreturn null;\n\nfunction addHostKey(host) {\n    let allHosts = flow.get('all_hosts') || [];\n    allHosts.push(`host_${host.replaceAll('.', '_')}`);\n    flow.set('all_hosts', allHosts);\n}\n\nfunction clear() {\n    flow.set('all_hosts', null);\n\n    flow.keys().forEach(key => {\n        if (key.startsWith('host_')) {\n            flow.set(key, undefined);\n        }\n    });\n}\n\nfunction ping(hosts) {\n    for (const host of hosts) {\n        addHostKey(host);\n        msg.host = host;\n        node.send(msg, true);\n    }\n}",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 340,
+        "y": 80,
+        "wires": [
+            [
+                "5fe0b6a6f70d5a28"
+            ]
+        ]
+    },
+    {
+        "id": "5fe0b6a6f70d5a28",
+        "type": "conf ping",
+        "z": "utility-internet-connectivity",
+        "g": "5181647e287488d2",
+        "name": "Ping",
+        "host": "",
+        "timeout": "5",
+        "requests": "1",
+        "x": 530,
+        "y": 80,
+        "wires": [
+            [
+                "48838c2709c6e447"
+            ]
+        ]
+    },
+    {
+        "id": "48838c2709c6e447",
+        "type": "function",
+        "z": "utility-internet-connectivity",
+        "g": "5181647e287488d2",
+        "name": "Coalesce",
+        "func": "const all_hosts = flow.get('all_hosts');\n\n// Record this host's result\nflow.set(`host_${msg.host.replaceAll('.', '_')}`, msg.payload);\n\nif (!isComplete()) return null;\n\nconst timestamp = new Date().toISOString();\nconst source = 'connectivity_monitor';\nconst messages = [];\n\n// Per-host state messages\nfor (const hostKey of all_hosts) {\n    const rtt = flow.get(hostKey);\n    const ip = hostKey.replace('host_', '').replaceAll('_', '.');\n    const topicKey = hostKey.replace('host_', '');\n\n    messages.push({\n        topic: `highland/state/network/ping/${topicKey}`,\n        payload: JSON.stringify({\n            timestamp,\n            source,\n            state: rtt !== false ? 'up' : 'down',\n            rtt: rtt !== false ? rtt : null\n        }),\n        retain: true,\n        qos: 1\n    });\n}\n\n// Aggregate connectivity state\nconst results = all_hosts.map(h => flow.get(h));\nconst upCount = results.filter(r => r !== false).length;\nconst aggregateState = upCount === all_hosts.length ? 'up'\n    : upCount === 0 ? 'down'\n    : 'degraded';\n\n// Connectivity changed event\nconst previousState = flow.get('connectivity_state');\nif (previousState !== aggregateState) {\n    flow.set('connectivity_state', aggregateState);\n    messages.push({\n        topic: 'highland/event/network/connectivity_changed',\n        payload: JSON.stringify({\n            timestamp,\n            source,\n            previous: previousState || 'unknown',\n            current: aggregateState\n        }),\n        retain: false,\n        qos: 1\n    });\n}\n\n// Aggregate state message\nmessages.push({\n    topic: 'highland/state/network/connectivity',\n    payload: JSON.stringify({\n        timestamp,\n        source,\n        state: aggregateState\n    }),\n    retain: true,\n    qos: 1\n});\n\n// Emit all messages\nfor (let i = 0; i < messages.length - 1; i++) {\n    node.send(messages[i]);\n}\n\nmsg.topic = messages[messages.length - 1].topic;\nmsg.payload = messages[messages.length - 1].payload;\nmsg.retain = messages[messages.length - 1].retain;\nmsg.qos = messages[messages.length - 1].qos;\n\nconst formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\nnode.status({ \n    fill: aggregateState === 'up' ? 'green' : aggregateState === 'degraded' ? 'yellow' : 'red', \n    shape: 'dot', \n    text: formatStatus(aggregateState.toUpperCase()) \n});\n\nreturn msg;\n\nfunction isComplete() {\n    return all_hosts.every(host => flow.get(host) !== undefined);\n}",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 700,
+        "y": 80,
+        "wires": [
+            [
+                "44508b4b18f724ff"
+            ]
+        ]
+    },
+    {
+        "id": "cf19c3912e220cfe",
+        "type": "speedtest",
+        "z": "utility-internet-connectivity",
+        "g": "7baf12c22199d087",
+        "name": "Speed Test",
+        "maxTime": 5000,
+        "serverId": "73509",
+        "acceptLicense": true,
+        "acceptGdpr": true,
+        "x": 330,
+        "y": 200,
+        "wires": [
+            [
+                "0c1389df5d67c1ef"
+            ]
+        ]
+    },
+    {
+        "id": "0c1389df5d67c1ef",
+        "type": "function",
+        "z": "utility-internet-connectivity",
+        "g": "7baf12c22199d087",
+        "name": "Parse",
+        "func": "const raw_results = msg.payload;\nconst downstream_mbps = Math.round(raw_results.download.bandwidth * 8 / 1000000);\nconst upstream_mbps = Math.round(raw_results.upload.bandwidth * 8 / 1000000);\n\nmsg.results = {\n    throughput: {\n        downstream: downstream_mbps,\n        upstream: upstream_mbps\n    },\n    ping: {\n        jitter: raw_results.ping.jitter,\n        latency: raw_results.ping.latency,\n        packet_loss: raw_results.packetLoss ?? 0\n    }\n};\n\nmsg.topic = 'highland/state/network/speedtest';\nmsg.payload = JSON.stringify({\n    timestamp: raw_results.timestamp,\n    source: 'speedtest_monitor',\n    throughput: msg.results.throughput,\n    ping: msg.results.ping,\n    server: {\n        name: raw_results.server.name,\n        location: raw_results.server.location\n    },\n    result_url: raw_results.result.url\n});\nmsg.retain = true;\nmsg.qos = 1;\n\nconst formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\nnode.status({ fill: 'green', shape: 'dot', text: formatStatus(`↓${downstream_mbps} ↑${upstream_mbps} Mbps`) });\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 510,
+        "y": 200,
+        "wires": [
+            [
+                "2534a92d896ad71a"
+            ]
+        ]
+    },
+    {
+        "id": "3b70c2c2217f3aa3",
+        "type": "cronplus",
+        "z": "utility-internet-connectivity",
+        "g": "5181647e287488d2",
+        "name": "Poll",
+        "outputField": "payload",
+        "timeZone": "",
+        "storeName": "",
+        "commandResponseMsgOutput": "output2",
+        "defaultLocation": "",
+        "defaultLocationType": "default",
+        "outputs": 2,
+        "options": [
+            {
+                "name": "Every Minute",
+                "topic": "every-minute",
+                "payloadType": "default",
+                "payload": "",
+                "expressionType": "cron",
+                "expression": "0 * * * * *",
+                "location": "",
+                "offset": "0",
+                "solarType": "all",
+                "solarEvents": "sunrise,sunset"
+            }
+        ],
+        "x": 150,
+        "y": 80,
+        "wires": [
+            [
+                "6183c0df74d720d7"
+            ],
+            []
+        ]
+    },
+    {
+        "id": "0aac22f390ebbd0b",
+        "type": "cronplus",
+        "z": "utility-internet-connectivity",
+        "g": "7baf12c22199d087",
+        "name": "Poll",
+        "outputField": "payload",
+        "timeZone": "",
+        "storeName": "",
+        "commandResponseMsgOutput": "output2",
+        "defaultLocation": "",
+        "defaultLocationType": "default",
+        "outputs": 2,
+        "options": [
+            {
+                "name": "Every Hour",
+                "topic": "every-hour",
+                "payloadType": "default",
+                "payload": "",
+                "expressionType": "cron",
+                "expression": "0 0 * * * ? *",
+                "location": "",
+                "offset": "0",
+                "solarType": "all",
+                "solarEvents": "sunrise,sunset"
+            }
+        ],
+        "x": 150,
+        "y": 200,
+        "wires": [
+            [
+                "cf19c3912e220cfe"
+            ],
+            []
+        ]
+    },
+    {
+        "id": "44ee0fe81da70ee1",
+        "type": "catch",
+        "z": "utility-internet-connectivity",
+        "g": "f6b8cf74e7bcfdea",
+        "name": "Catch All",
+        "scope": null,
+        "uncaught": false,
+        "x": 140,
+        "y": 440,
+        "wires": [
+            [
+                "570b24a3626601cf"
+            ]
+        ]
+    },
+    {
+        "id": "570b24a3626601cf",
+        "type": "debug",
+        "z": "utility-internet-connectivity",
+        "g": "f6b8cf74e7bcfdea",
+        "name": "Output",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 310,
+        "y": 440,
+        "wires": []
+    },
+    {
+        "id": "44508b4b18f724ff",
+        "type": "mqtt out",
+        "z": "utility-internet-connectivity",
+        "g": "5181647e287488d2",
+        "name": "Publish",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "4cefa2ad2d8b462e",
+        "x": 880,
+        "y": 80,
+        "wires": []
+    },
+    {
+        "id": "1f1b2524ab9a763d",
+        "type": "mqtt out",
+        "z": "utility-internet-connectivity",
+        "g": "d974bc2d2247af3b",
+        "name": "Publish",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "4cefa2ad2d8b462e",
+        "x": 580,
+        "y": 320,
+        "wires": []
+    },
+    {
+        "id": "344aea456a0205b2",
+        "type": "inject",
+        "z": "utility-internet-connectivity",
+        "g": "d974bc2d2247af3b",
+        "name": "On Startup",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 170,
+        "y": 320,
+        "wires": [
+            [
+                "ff30e8e1a9e770fe"
+            ]
+        ]
+    },
+    {
+        "id": "ff30e8e1a9e770fe",
+        "type": "function",
+        "z": "utility-internet-connectivity",
+        "g": "d974bc2d2247af3b",
+        "name": "Build Sensors",
+        "func": "const device = { identifiers: ['highland_network'] };\nconst fullDevice = {\n    ...device,\n    name: 'Highland Internet Connectivity',\n    model: 'Speed Test and Ping',\n    manufacturer: 'Highland'\n};\n\nconst configs = [\n    {\n        topic: 'homeassistant/binary_sensor/highland_network/connectivity/config',\n        payload: {\n            name: 'Internet Connectivity',\n            unique_id: 'highland_network_connectivity',\n            device_class: 'connectivity',\n            state_topic: 'highland/state/network/connectivity',\n            value_template: '{{ value_json.state }}',\n            payload_on: 'up',\n            payload_off: 'down',\n            device: fullDevice\n        }\n    },\n    {\n        topic: 'homeassistant/binary_sensor/highland_network/ping_8_8_8_8/config',\n        payload: {\n            name: 'Google DNS',\n            unique_id: 'highland_network_ping_8_8_8_8',\n            device_class: 'connectivity',\n            state_topic: 'highland/state/network/ping/8_8_8_8',\n            value_template: '{{ value_json.state }}',\n            payload_on: 'up',\n            payload_off: 'down',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/binary_sensor/highland_network/ping_1_1_1_1/config',\n        payload: {\n            name: 'Cloudflare DNS',\n            unique_id: 'highland_network_ping_1_1_1_1',\n            device_class: 'connectivity',\n            state_topic: 'highland/state/network/ping/1_1_1_1',\n            value_template: '{{ value_json.state }}',\n            payload_on: 'up',\n            payload_off: 'down',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/binary_sensor/highland_network/ping_208_67_222_222/config',\n        payload: {\n            name: 'OpenDNS',\n            unique_id: 'highland_network_ping_208_67_222_222',\n            device_class: 'connectivity',\n            state_topic: 'highland/state/network/ping/208_67_222_222',\n            value_template: '{{ value_json.state }}',\n            payload_on: 'up',\n            payload_off: 'down',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/rtt_8_8_8_8/config',\n        payload: {\n            name: 'Google DNS RTT',\n            unique_id: 'highland_network_rtt_8_8_8_8',\n            state_topic: 'highland/state/network/ping/8_8_8_8',\n            value_template: '{{ value_json.rtt }}',\n            unit_of_measurement: 'ms',\n            device_class: 'duration',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/rtt_1_1_1_1/config',\n        payload: {\n            name: 'Cloudflare DNS RTT',\n            unique_id: 'highland_network_rtt_1_1_1_1',\n            state_topic: 'highland/state/network/ping/1_1_1_1',\n            value_template: '{{ value_json.rtt }}',\n            unit_of_measurement: 'ms',\n            device_class: 'duration',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/rtt_208_67_222_222/config',\n        payload: {\n            name: 'OpenDNS RTT',\n            unique_id: 'highland_network_rtt_208_67_222_222',\n            state_topic: 'highland/state/network/ping/208_67_222_222',\n            value_template: '{{ value_json.rtt }}',\n            unit_of_measurement: 'ms',\n            device_class: 'duration',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/speedtest_downstream/config',\n        payload: {\n            name: 'Download Speed',\n            unique_id: 'highland_network_speedtest_downstream',\n            state_topic: 'highland/state/network/speedtest',\n            value_template: '{{ value_json.throughput.downstream }}',\n            unit_of_measurement: 'Mbps',\n            device_class: 'data_rate',\n            state_class: 'measurement',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/speedtest_upstream/config',\n        payload: {\n            name: 'Upload Speed',\n            unique_id: 'highland_network_speedtest_upstream',\n            state_topic: 'highland/state/network/speedtest',\n            value_template: '{{ value_json.throughput.upstream }}',\n            unit_of_measurement: 'Mbps',\n            device_class: 'data_rate',\n            state_class: 'measurement',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/speedtest_ping_latency/config',\n        payload: {\n            name: 'Speedtest Ping Latency',\n            unique_id: 'highland_network_speedtest_ping_latency',\n            state_topic: 'highland/state/network/speedtest',\n            value_template: '{{ value_json.ping.latency }}',\n            unit_of_measurement: 'ms',\n            device_class: 'duration',\n            state_class: 'measurement',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/speedtest_ping_jitter/config',\n        payload: {\n            name: 'Speedtest Ping Jitter',\n            unique_id: 'highland_network_speedtest_ping_jitter',\n            state_topic: 'highland/state/network/speedtest',\n            value_template: '{{ value_json.ping.jitter }}',\n            unit_of_measurement: 'ms',\n            device_class: 'duration',\n            state_class: 'measurement',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/speedtest_packet_loss/config',\n        payload: {\n            name: 'Speedtest Packet Loss',\n            unique_id: 'highland_network_speedtest_packet_loss',\n            state_topic: 'highland/state/network/speedtest',\n            value_template: '{{ value_json.ping.packet_loss }}',\n            unit_of_measurement: '%',\n            state_class: 'measurement',\n            device\n        }\n    }\n];\n\nfor (let i = 0; i < configs.length - 1; i++) {\n    node.send({\n        topic: configs[i].topic,\n        payload: JSON.stringify(configs[i].payload),\n        retain: true,\n        qos: 1\n    });\n}\n\nmsg.topic = configs[configs.length - 1].topic;\nmsg.payload = JSON.stringify(configs[configs.length - 1].payload);\nmsg.retain = true;\nmsg.qos = 1;\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 380,
+        "y": 320,
+        "wires": [
+            [
+                "1f1b2524ab9a763d"
+            ]
+        ]
+    },
+    {
+        "id": "2534a92d896ad71a",
+        "type": "mqtt out",
+        "z": "utility-internet-connectivity",
+        "g": "7baf12c22199d087",
+        "name": "Publish",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "4cefa2ad2d8b462e",
+        "x": 680,
+        "y": 200,
+        "wires": []
+    },
+    {
+        "id": "4cefa2ad2d8b462e",
+        "type": "mqtt-broker",
+        "name": "Hub",
+        "broker": "hub.local",
+        "port": 1883,
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": 4,
+        "keepalive": 60,
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "7f39d2ed310ac7d3",
+        "type": "global-config",
+        "env": [],
+        "modules": {
+            "node-red-configurable-ping": "1.0.1",
+            "node-red-contrib-speedtest": "1.1.0",
+            "node-red-contrib-cron-plus": "2.2.4"
+        }
+    }
+]

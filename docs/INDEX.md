@@ -79,6 +79,7 @@ Everything needed to build and maintain Node-RED flows in Highland.
 | [`nodered/HEALTH_MONITORING.md`](nodered/HEALTH_MONITORING.md) | Health Monitor flow, Healthchecks.io architecture, failure signature matrix, Utility: Connections |
 | [`nodered/BATTERY_MONITOR.md`](nodered/BATTERY_MONITOR.md) | Utility: Battery Monitor — states, notifications, device catalog, startup recovery |
 | [`nodered/DAILY_DIGEST.md`](nodered/DAILY_DIGEST.md) | Utility: Daily Digest — data sources, email design, Meteocons CID icons, recipients |
+| [`nodered/INTERNET_CONNECTIVITY.md`](nodered/INTERNET_CONNECTIVITY.md) | Utility: Internet Connectivity — connectivity pipeline (multi-host ping), throughput pipeline (Speedtest), HA Discovery, pending alerting and logging |
 
 ---
 
@@ -183,5 +184,5 @@ New automation ideas → `AUTOMATION_BACKLOG.md`. Don't derail current work; cap
 
 ---
 
-*Last Updated: 2026-04-24*
+*Last Updated: 2026-04-28*
 
