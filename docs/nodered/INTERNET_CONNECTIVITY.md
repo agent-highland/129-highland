@@ -79,9 +79,13 @@ Three DNS resolvers pinged in parallel via `node-red-configurable-ping`:
 
 ### Speed Test
 
-`node-red-contrib-speedtest` wraps the Speedtest CLI. Pinned to server ID `73509` (Contabo, Carlstadt NJ) for consistent comparable results — server variance was observed to cause significant upstream measurement discrepancy across servers.
+`node-red-contrib-speedtest` wraps the Speedtest CLI. Auto-selects the best available server at test time — pinning to a specific server was found to introduce server-side capacity constraints as a variable in measurements.
 
-**Cadence:** Hourly via CronPlus.
+**Cadence:** Hourly via CronPlus, or on-demand via `highland/command/network/speedtest`.
+
+Both CronPlus and the MQTT command feed through a shared `Guard` function that prevents concurrent tests via `flow.speedtest_running`. A group-scoped `Catch` clears the flag on error to prevent permanent lock.
+
+A `Run Speed Test` button entity is exposed via MQTT Discovery, publishing to `highland/command/network/speedtest` when pressed from the HA dashboard.
 
 ### Parse
 
@@ -142,6 +146,7 @@ All entities published under a single device `Highland Internet Connectivity` (i
 | Speedtest Ping Latency | `sensor` | `sensor.internet_speedtest_ping_latency` | `highland/state/network/speedtest` |
 | Speedtest Ping Jitter | `sensor` | `sensor.internet_speedtest_ping_jitter` | `highland/state/network/speedtest` |
 | Speedtest Packet Loss | `sensor` | `sensor.internet_speedtest_packet_loss` | `highland/state/network/speedtest` |
+| Run Speed Test | `button` | `button.internet_run_speed_test` | `highland/command/network/speedtest` |
 
 **Notes:**
 - `binary_sensor` connectivity entities use `payload_on: 'up'`, `payload_off: 'down'` — `degraded` aggregate state shows as `off`
@@ -157,6 +162,7 @@ All entities published under a single device `Highland Internet Connectivity` (i
 - **#56** — Slow speed detection and notification (thresholds TBD after baseline established)
 - **#57** — ~~Healthchecks.io dead man's switch gating~~ **Implemented in `Utility: Health Checks`** — Internet Connectivity group gates ping on `highland/state/network/connectivity` state
 - **#58** — State change and result logging
+- **#59** — ~~On-demand speed test~~ **Implemented** — Guard function, group-scoped Catch, HA button entity
 
 ---
 

@@ -39,12 +39,16 @@
             "cf19c3912e220cfe",
             "0c1389df5d67c1ef",
             "0aac22f390ebbd0b",
-            "2534a92d896ad71a"
+            "2534a92d896ad71a",
+            "e34efb9fb2e3f75c",
+            "819e27d289fbb5e9",
+            "326d83e7a1d853d1",
+            "fd2fa1ed3cc01106"
         ],
         "x": 54,
         "y": 159,
-        "w": 712,
-        "h": 82
+        "w": 872,
+        "h": 202
     },
     {
         "id": "f6b8cf74e7bcfdea",
@@ -59,7 +63,7 @@
             "570b24a3626601cf"
         ],
         "x": 54,
-        "y": 399,
+        "y": 519,
         "w": 352,
         "h": 82
     },
@@ -77,7 +81,7 @@
             "ff30e8e1a9e770fe"
         ],
         "x": 54,
-        "y": 279,
+        "y": 399,
         "w": 612,
         "h": 82
     },
@@ -147,10 +151,10 @@
         "g": "7baf12c22199d087",
         "name": "Speed Test",
         "maxTime": 5000,
-        "serverId": "73509",
+        "serverId": "",
         "acceptLicense": true,
         "acceptGdpr": true,
-        "x": 330,
+        "x": 490,
         "y": 200,
         "wires": [
             [
@@ -164,14 +168,14 @@
         "z": "utility-internet-connectivity",
         "g": "7baf12c22199d087",
         "name": "Parse",
-        "func": "const raw_results = msg.payload;\nconst downstream_mbps = Math.round(raw_results.download.bandwidth * 8 / 1000000);\nconst upstream_mbps = Math.round(raw_results.upload.bandwidth * 8 / 1000000);\n\nmsg.results = {\n    throughput: {\n        downstream: downstream_mbps,\n        upstream: upstream_mbps\n    },\n    ping: {\n        jitter: raw_results.ping.jitter,\n        latency: raw_results.ping.latency,\n        packet_loss: raw_results.packetLoss ?? 0\n    }\n};\n\nmsg.topic = 'highland/state/network/speedtest';\nmsg.payload = JSON.stringify({\n    timestamp: raw_results.timestamp,\n    source: 'speedtest_monitor',\n    throughput: msg.results.throughput,\n    ping: msg.results.ping,\n    server: {\n        name: raw_results.server.name,\n        location: raw_results.server.location\n    },\n    result_url: raw_results.result.url\n});\nmsg.retain = true;\nmsg.qos = 1;\n\nconst formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\nnode.status({ fill: 'green', shape: 'dot', text: formatStatus(`↓${downstream_mbps} ↑${upstream_mbps} Mbps`) });\n\nreturn msg;",
+        "func": "const raw_results = msg.payload;\nconst downstream_mbps = Math.round(raw_results.download.bandwidth * 8 / 1000000);\nconst upstream_mbps = Math.round(raw_results.upload.bandwidth * 8 / 1000000);\n\nmsg.results = {\n    throughput: {\n        downstream: downstream_mbps,\n        upstream: upstream_mbps\n    },\n    ping: {\n        jitter: raw_results.ping.jitter,\n        latency: raw_results.ping.latency,\n        packet_loss: raw_results.packetLoss ?? 0\n    }\n};\n\nmsg.topic = 'highland/state/network/speedtest';\nmsg.payload = JSON.stringify({\n    timestamp: raw_results.timestamp,\n    source: 'speedtest_monitor',\n    throughput: msg.results.throughput,\n    ping: msg.results.ping,\n    server: {\n        name: raw_results.server.name,\n        location: raw_results.server.location\n    },\n    result_url: raw_results.result.url\n});\n\nflow.set('speedtest_running', false);\n\nmsg.retain = true;\nmsg.qos = 1;\n\nconst formatStatus = global.get('utils.formatStatus', 'initializers') || (t => t);\nnode.status({ fill: 'green', shape: 'dot', text: formatStatus(`↓${downstream_mbps} ↑${upstream_mbps} Mbps`) });\n\nreturn msg;",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 510,
+        "x": 670,
         "y": 200,
         "wires": [
             [
@@ -246,7 +250,7 @@
         "y": 200,
         "wires": [
             [
-                "cf19c3912e220cfe"
+                "819e27d289fbb5e9"
             ],
             []
         ]
@@ -260,7 +264,7 @@
         "scope": null,
         "uncaught": false,
         "x": 140,
-        "y": 440,
+        "y": 560,
         "wires": [
             [
                 "570b24a3626601cf"
@@ -282,7 +286,7 @@
         "statusVal": "",
         "statusType": "auto",
         "x": 310,
-        "y": 440,
+        "y": 560,
         "wires": []
     },
     {
@@ -320,7 +324,7 @@
         "expiry": "",
         "broker": "4cefa2ad2d8b462e",
         "x": 580,
-        "y": 320,
+        "y": 440,
         "wires": []
     },
     {
@@ -346,7 +350,7 @@
         "payload": "",
         "payloadType": "date",
         "x": 170,
-        "y": 320,
+        "y": 440,
         "wires": [
             [
                 "ff30e8e1a9e770fe"
@@ -359,7 +363,7 @@
         "z": "utility-internet-connectivity",
         "g": "d974bc2d2247af3b",
         "name": "Build Sensors",
-        "func": "const device = { identifiers: ['highland_network'] };\nconst fullDevice = {\n    ...device,\n    name: 'Highland Internet Connectivity',\n    model: 'Speed Test and Ping',\n    manufacturer: 'Highland'\n};\n\nconst configs = [\n    {\n        topic: 'homeassistant/binary_sensor/highland_network/connectivity/config',\n        payload: {\n            name: 'Internet Connectivity',\n            unique_id: 'highland_network_connectivity',\n            device_class: 'connectivity',\n            state_topic: 'highland/state/network/connectivity',\n            value_template: '{{ value_json.state }}',\n            payload_on: 'up',\n            payload_off: 'down',\n            device: fullDevice\n        }\n    },\n    {\n        topic: 'homeassistant/binary_sensor/highland_network/ping_8_8_8_8/config',\n        payload: {\n            name: 'Google DNS',\n            unique_id: 'highland_network_ping_8_8_8_8',\n            device_class: 'connectivity',\n            state_topic: 'highland/state/network/ping/8_8_8_8',\n            value_template: '{{ value_json.state }}',\n            payload_on: 'up',\n            payload_off: 'down',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/binary_sensor/highland_network/ping_1_1_1_1/config',\n        payload: {\n            name: 'Cloudflare DNS',\n            unique_id: 'highland_network_ping_1_1_1_1',\n            device_class: 'connectivity',\n            state_topic: 'highland/state/network/ping/1_1_1_1',\n            value_template: '{{ value_json.state }}',\n            payload_on: 'up',\n            payload_off: 'down',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/binary_sensor/highland_network/ping_208_67_222_222/config',\n        payload: {\n            name: 'OpenDNS',\n            unique_id: 'highland_network_ping_208_67_222_222',\n            device_class: 'connectivity',\n            state_topic: 'highland/state/network/ping/208_67_222_222',\n            value_template: '{{ value_json.state }}',\n            payload_on: 'up',\n            payload_off: 'down',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/rtt_8_8_8_8/config',\n        payload: {\n            name: 'Google DNS RTT',\n            unique_id: 'highland_network_rtt_8_8_8_8',\n            state_topic: 'highland/state/network/ping/8_8_8_8',\n            value_template: '{{ value_json.rtt }}',\n            unit_of_measurement: 'ms',\n            device_class: 'duration',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/rtt_1_1_1_1/config',\n        payload: {\n            name: 'Cloudflare DNS RTT',\n            unique_id: 'highland_network_rtt_1_1_1_1',\n            state_topic: 'highland/state/network/ping/1_1_1_1',\n            value_template: '{{ value_json.rtt }}',\n            unit_of_measurement: 'ms',\n            device_class: 'duration',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/rtt_208_67_222_222/config',\n        payload: {\n            name: 'OpenDNS RTT',\n            unique_id: 'highland_network_rtt_208_67_222_222',\n            state_topic: 'highland/state/network/ping/208_67_222_222',\n            value_template: '{{ value_json.rtt }}',\n            unit_of_measurement: 'ms',\n            device_class: 'duration',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/speedtest_downstream/config',\n        payload: {\n            name: 'Download Speed',\n            unique_id: 'highland_network_speedtest_downstream',\n            state_topic: 'highland/state/network/speedtest',\n            value_template: '{{ value_json.throughput.downstream }}',\n            unit_of_measurement: 'Mbps',\n            device_class: 'data_rate',\n            state_class: 'measurement',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/speedtest_upstream/config',\n        payload: {\n            name: 'Upload Speed',\n            unique_id: 'highland_network_speedtest_upstream',\n            state_topic: 'highland/state/network/speedtest',\n            value_template: '{{ value_json.throughput.upstream }}',\n            unit_of_measurement: 'Mbps',\n            device_class: 'data_rate',\n            state_class: 'measurement',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/speedtest_ping_latency/config',\n        payload: {\n            name: 'Speedtest Ping Latency',\n            unique_id: 'highland_network_speedtest_ping_latency',\n            state_topic: 'highland/state/network/speedtest',\n            value_template: '{{ value_json.ping.latency }}',\n            unit_of_measurement: 'ms',\n            device_class: 'duration',\n            state_class: 'measurement',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/speedtest_ping_jitter/config',\n        payload: {\n            name: 'Speedtest Ping Jitter',\n            unique_id: 'highland_network_speedtest_ping_jitter',\n            state_topic: 'highland/state/network/speedtest',\n            value_template: '{{ value_json.ping.jitter }}',\n            unit_of_measurement: 'ms',\n            device_class: 'duration',\n            state_class: 'measurement',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/speedtest_packet_loss/config',\n        payload: {\n            name: 'Speedtest Packet Loss',\n            unique_id: 'highland_network_speedtest_packet_loss',\n            state_topic: 'highland/state/network/speedtest',\n            value_template: '{{ value_json.ping.packet_loss }}',\n            unit_of_measurement: '%',\n            state_class: 'measurement',\n            device\n        }\n    }\n];\n\nfor (let i = 0; i < configs.length - 1; i++) {\n    node.send({\n        topic: configs[i].topic,\n        payload: JSON.stringify(configs[i].payload),\n        retain: true,\n        qos: 1\n    });\n}\n\nmsg.topic = configs[configs.length - 1].topic;\nmsg.payload = JSON.stringify(configs[configs.length - 1].payload);\nmsg.retain = true;\nmsg.qos = 1;\nreturn msg;",
+        "func": "const device = { identifiers: ['highland_network'] };\nconst fullDevice = {\n    ...device,\n    name: 'Highland Internet Connectivity',\n    model: 'Speed Test and Ping',\n    manufacturer: 'Highland'\n};\n\nconst configs = [\n    {\n        topic: 'homeassistant/binary_sensor/highland_network/connectivity/config',\n        payload: {\n            name: 'Internet Connectivity',\n            unique_id: 'highland_network_connectivity',\n            device_class: 'connectivity',\n            state_topic: 'highland/state/network/connectivity',\n            value_template: '{{ value_json.state }}',\n            payload_on: 'up',\n            payload_off: 'down',\n            device: fullDevice\n        }\n    },\n    {\n        topic: 'homeassistant/binary_sensor/highland_network/ping_8_8_8_8/config',\n        payload: {\n            name: 'Google DNS',\n            unique_id: 'highland_network_ping_8_8_8_8',\n            device_class: 'connectivity',\n            state_topic: 'highland/state/network/ping/8_8_8_8',\n            value_template: '{{ value_json.state }}',\n            payload_on: 'up',\n            payload_off: 'down',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/binary_sensor/highland_network/ping_1_1_1_1/config',\n        payload: {\n            name: 'Cloudflare DNS',\n            unique_id: 'highland_network_ping_1_1_1_1',\n            device_class: 'connectivity',\n            state_topic: 'highland/state/network/ping/1_1_1_1',\n            value_template: '{{ value_json.state }}',\n            payload_on: 'up',\n            payload_off: 'down',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/binary_sensor/highland_network/ping_208_67_222_222/config',\n        payload: {\n            name: 'OpenDNS',\n            unique_id: 'highland_network_ping_208_67_222_222',\n            device_class: 'connectivity',\n            state_topic: 'highland/state/network/ping/208_67_222_222',\n            value_template: '{{ value_json.state }}',\n            payload_on: 'up',\n            payload_off: 'down',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/rtt_8_8_8_8/config',\n        payload: {\n            name: 'Google DNS RTT',\n            unique_id: 'highland_network_rtt_8_8_8_8',\n            state_topic: 'highland/state/network/ping/8_8_8_8',\n            value_template: '{{ value_json.rtt }}',\n            unit_of_measurement: 'ms',\n            device_class: 'duration',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/rtt_1_1_1_1/config',\n        payload: {\n            name: 'Cloudflare DNS RTT',\n            unique_id: 'highland_network_rtt_1_1_1_1',\n            state_topic: 'highland/state/network/ping/1_1_1_1',\n            value_template: '{{ value_json.rtt }}',\n            unit_of_measurement: 'ms',\n            device_class: 'duration',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/rtt_208_67_222_222/config',\n        payload: {\n            name: 'OpenDNS RTT',\n            unique_id: 'highland_network_rtt_208_67_222_222',\n            state_topic: 'highland/state/network/ping/208_67_222_222',\n            value_template: '{{ value_json.rtt }}',\n            unit_of_measurement: 'ms',\n            device_class: 'duration',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/speedtest_downstream/config',\n        payload: {\n            name: 'Download Speed',\n            unique_id: 'highland_network_speedtest_downstream',\n            state_topic: 'highland/state/network/speedtest',\n            value_template: '{{ value_json.throughput.downstream }}',\n            unit_of_measurement: 'Mbit/s',\n            device_class: 'data_rate',\n            state_class: 'measurement',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/speedtest_upstream/config',\n        payload: {\n            name: 'Upload Speed',\n            unique_id: 'highland_network_speedtest_upstream',\n            state_topic: 'highland/state/network/speedtest',\n            value_template: '{{ value_json.throughput.upstream }}',\n            unit_of_measurement: 'Mbit/s',\n            device_class: 'data_rate',\n            state_class: 'measurement',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/speedtest_ping_latency/config',\n        payload: {\n            name: 'Speedtest Ping Latency',\n            unique_id: 'highland_network_speedtest_ping_latency',\n            state_topic: 'highland/state/network/speedtest',\n            value_template: '{{ value_json.ping.latency }}',\n            unit_of_measurement: 'ms',\n            device_class: 'duration',\n            state_class: 'measurement',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/speedtest_ping_jitter/config',\n        payload: {\n            name: 'Speedtest Ping Jitter',\n            unique_id: 'highland_network_speedtest_ping_jitter',\n            state_topic: 'highland/state/network/speedtest',\n            value_template: '{{ value_json.ping.jitter }}',\n            unit_of_measurement: 'ms',\n            device_class: 'duration',\n            state_class: 'measurement',\n            device\n        }\n    },\n    {\n        topic: 'homeassistant/sensor/highland_network/speedtest_packet_loss/config',\n        payload: {\n            name: 'Speedtest Packet Loss',\n            unique_id: 'highland_network_speedtest_packet_loss',\n            state_topic: 'highland/state/network/speedtest',\n            value_template: '{{ value_json.ping.packet_loss }}',\n            unit_of_measurement: '%',\n            state_class: 'measurement',\n            device\n        }\n    },\n    {\n    topic: 'homeassistant/button/highland_network/speedtest_run/config',\n    payload: {\n        name: 'Run Speed Test',\n        unique_id: 'highland_network_speedtest_run',\n        command_topic: 'highland/command/network/speedtest',\n        payload_press: '{\"source\": \"ha_button\"}',\n        device\n    }\n}];\n\nfor (let i = 0; i < configs.length - 1; i++) {\n    node.send({\n        topic: configs[i].topic,\n        payload: JSON.stringify(configs[i].payload),\n        retain: true,\n        qos: 1\n    });\n}\n\nmsg.topic = configs[configs.length - 1].topic;\nmsg.payload = JSON.stringify(configs[configs.length - 1].payload);\nmsg.retain = true;\nmsg.qos = 1;\nreturn msg;",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,
@@ -367,7 +371,7 @@
         "finalize": "",
         "libs": [],
         "x": 380,
-        "y": 320,
+        "y": 440,
         "wires": [
             [
                 "1f1b2524ab9a763d"
@@ -389,8 +393,84 @@
         "correl": "",
         "expiry": "",
         "broker": "4cefa2ad2d8b462e",
-        "x": 680,
+        "x": 840,
         "y": 200,
+        "wires": []
+    },
+    {
+        "id": "e34efb9fb2e3f75c",
+        "type": "catch",
+        "z": "utility-internet-connectivity",
+        "g": "7baf12c22199d087",
+        "name": "Catch Group",
+        "scope": "group",
+        "uncaught": false,
+        "x": 150,
+        "y": 320,
+        "wires": [
+            [
+                "fd2fa1ed3cc01106"
+            ]
+        ]
+    },
+    {
+        "id": "819e27d289fbb5e9",
+        "type": "function",
+        "z": "utility-internet-connectivity",
+        "g": "7baf12c22199d087",
+        "name": "Guard",
+        "func": "if (flow.get('speedtest_running')) {\n    node.warn('Speed test already in progress, ignoring request');\n    return null;\n}\n\nflow.set('speedtest_running', true);\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 310,
+        "y": 200,
+        "wires": [
+            [
+                "cf19c3912e220cfe"
+            ]
+        ]
+    },
+    {
+        "id": "326d83e7a1d853d1",
+        "type": "mqtt in",
+        "z": "utility-internet-connectivity",
+        "g": "7baf12c22199d087",
+        "name": "Command",
+        "topic": "highland/command/network/speedtest",
+        "qos": "1",
+        "datatype": "auto-detect",
+        "broker": "4cefa2ad2d8b462e",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 140,
+        "y": 260,
+        "wires": [
+            [
+                "819e27d289fbb5e9"
+            ]
+        ]
+    },
+    {
+        "id": "fd2fa1ed3cc01106",
+        "type": "function",
+        "z": "utility-internet-connectivity",
+        "g": "7baf12c22199d087",
+        "name": "Handle",
+        "func": "flow.set('speedtest_running', false);\nnode.error('Speed test error: ' + msg.error.message, msg);\n\nreturn null;",
+        "outputs": 0,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 340,
+        "y": 320,
         "wires": []
     },
     {
@@ -425,7 +505,7 @@
         "sessionExpiry": ""
     },
     {
-        "id": "7f39d2ed310ac7d3",
+        "id": "c3ba48c6abcd4807",
         "type": "global-config",
         "env": [],
         "modules": {
