@@ -41,7 +41,8 @@ System-level decisions, hardware, topology, network, and backup strategy.
 
 | Document | When to Reference |
 |----------|------------------|
-| [`architecture/OVERVIEW.md`](architecture/OVERVIEW.md) | Hardware allocation, system topology, two-layer event architecture, migration strategy, LLM inference box stretch goal |
+| [`architecture/OVERVIEW.md`](architecture/OVERVIEW.md) | Hardware allocation, system topology, two-layer event architecture, migration strategy, LLM inference box stretch goal pointer |
+| [`architecture/AI_PLATFORM.md`](architecture/AI_PLATFORM.md) | Conversational AI platform decisions — capability tier, hardware sizing, hybrid cloud routing question, voice latency budget. Authoritative source for cross-cutting AI choices |
 | [`architecture/NETWORK.md`](architecture/NETWORK.md) | Host inventory, port reference, remote access, mDNS gotchas, USB serial devices |
 | [`architecture/BACKUP_RECOVERY.md`](architecture/BACKUP_RECOVERY.md) | Per-host backup strategy, MQTT-triggered backup architecture, retention policy, recovery scenarios |
 
@@ -115,8 +116,8 @@ Domain-specific designs. Each subsystem is fully designed and ready for implemen
 | [`subsystems/EUFY_LOCKS.md`](subsystems/EUFY_LOCKS.md) | 📋 Planned | eufy-bridge TypeScript service, MQTT integration for Eufy Wi-Fi locks, lock-only scope, secondary account strategy |
 | [`subsystems/LANDROID.md`](subsystems/LANDROID.md) | 📋 Planned | Worx Landroid Vision WR344 — Mosquitto bridge to AWS IoT Core, normalized state, error/rain delay notifications |
 | [`subsystems/MATTER.md`](subsystems/MATTER.md) | 📋 Planned | `matter.js`-based bridge service, dedicated PoE Thread Border Router, `matter/#` private topic surface translated to `highland/#`, triggered by specific device need |
-| [`subsystems/ai/ASSIST_PIPELINE.md`](subsystems/ai/ASSIST_PIPELINE.md) | 📋 Planned | HA Assist voice pipeline, two-tier conversation agent, Echo Show experiment, satellite targeting |
-| [`subsystems/ai/PERSISTENT_MEMORY.md`](subsystems/ai/PERSISTENT_MEMORY.md) | ⏸ Blocked | AI memory architecture — blocked on hardware and HA pipeline event access |
+| [`subsystems/ai/ASSIST_PIPELINE.md`](subsystems/ai/ASSIST_PIPELINE.md) | ⏸ Blocked | Voice pipeline (Wyoming, faster-whisper STT, Piper TTS, custom "Marvin" wake word), Marvin persona, satellite strategy, proactive conversations — blocked on LLM box hardware |
+| [`subsystems/ai/PERSISTENT_MEMORY.md`](subsystems/ai/PERSISTENT_MEMORY.md) | ⏸ Blocked | Three-lanes memory architecture (conversational, seed knowledge, live data), pgvector storage, knowledge sync, safety framework — blocked on LLM box hardware |
 
 ---
 
@@ -184,5 +185,5 @@ New automation ideas → `AUTOMATION_BACKLOG.md`. Don't derail current work; cap
 
 ---
 
-*Last Updated: 2026-04-28*
+*Last Updated: 2026-05-08*
 

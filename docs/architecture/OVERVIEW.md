@@ -134,13 +134,13 @@ The new infrastructure is built alongside the existing live system. This is not 
 
 **Status:** Deferred — post-baseline only. Do not begin until HAOS, Node-RED, and Edge AI box are all stable.
 
-The Edge AI box has one PCIe slot occupied by the Coral TPU, leaving no room for a GPU. A separate dedicated Ollama inference box unblocks the persistent memory architecture for Marvin (the AI assistant).
+The Edge AI box has one PCIe slot occupied by the Coral TPU, leaving no room for a GPU. A separate dedicated Ollama inference box unblocks Marvin (the AI assistant) — both the conversation agent and the embedding model that powers persistent memory retrieval.
 
-**Candidate hardware:** Existing ATX mid-tower (AMD Ryzen 5 3600, 64GB DDR4, 1TB SSD + 4TB HDD, RX 580 → replace with RTX 3060 12GB)
+**Candidate hardware:** Existing ATX mid-tower (AMD Ryzen 5 3600, 64GB DDR4, 1TB SSD + 4TB HDD), GPU swap from RX 580 to a used NVIDIA RTX 3090 24GB.
 
-Required change: swap RX 580 for RTX 3060 12GB (~$200–250 used). CUDA on RTX 3060 is clean and well-supported; ROCm on RX 580 is inconsistent. 12GB VRAM runs 13B models comfortably.
+Full rationale — capability tier, hardware sizing, why 24GB VRAM, hybrid cloud question, voice latency budget — lives in `architecture/AI_PLATFORM.md`. That doc is the authoritative source for AI platform decisions; this section is a pointer.
 
-See `subsystems/ai/ASSIST_PIPELINE.md` and `subsystems/ai/PERSISTENT_MEMORY.md` for full context on why this is a blocker.
+See also `subsystems/ai/ASSIST_PIPELINE.md` and `subsystems/ai/PERSISTENT_MEMORY.md` for the subsystems this box powers.
 
 ---
 
@@ -156,4 +156,4 @@ See `subsystems/ai/ASSIST_PIPELINE.md` and `subsystems/ai/PERSISTENT_MEMORY.md` 
 
 ---
 
-*Last Updated: 2026-03-26*
+*Last Updated: 2026-05-08*

@@ -2,98 +2,146 @@
 
 ## Status
 
-**Working notes — directional, not final.** Implementation follows baseline infrastructure build.
+**Architecture defined; implementation pending.** Cross-cutting AI platform decisions (model tier, hardware sizing, hybrid cloud routing) live in `architecture/AI_PLATFORM.md`. Memory architecture lives in `subsystems/ai/PERSISTENT_MEMORY.md`. This doc owns the voice pipeline, satellite strategy, and persona.
 
-**Dependency:** Baseline infrastructure (Communication Hub → HAOS → Node-RED → Edge AI box) must be stable before beginning.
+**Dependency:** Baseline infrastructure (Communication Hub → HAOS → Node-RED → LLM box) must be stable before beginning.
 
 ---
 
 ## Overview
 
-HA Assist pipeline provides both chat and voice interfaces for home control and queries. Unlike most of Highland's architecture, Assist lives entirely within Home Assistant — it is explicitly HA-dependent. If HA is down, Assist is down. This is acceptable because:
+HA Assist provides chat and voice interfaces for home control and queries. The pipeline is built on the **Wyoming protocol**, which decouples each stage into independently swappable services that talk over the network. Each stage can run on a different host without architectural impact.
 
-- Critical automations run via Node-RED/MQTT independent of HA
-- Assist is a convenience/accessibility layer on top of a resilient control plane
-- Making HA itself stable (dedicated HAOS box) is the correct mitigation
+The pipeline is a convenience and accessibility surface on top of Highland's resilient control plane. Critical automations run via Node-RED/MQTT independent of HA, so an Assist outage is non-load-bearing for the house's actual operation.
 
 ---
 
 ## Pipeline Components
 
-Four loosely-coupled stages, each independently swappable:
+Four loosely-coupled stages, each independently swappable via Wyoming:
 
 | Stage | Purpose | Selected Option |
 |-------|---------|-----------------|
-| **Wake Word** | Trigger hands-free listening | openWakeWord (local, HA add-on) |
-| **STT** | Audio → text | Whisper (local, HA add-on) |
-| **Conversation Agent** | Interpret intent, formulate response | Two-tier (see below) |
-| **TTS** | Text → audio | Google Cloud TTS (Neural2 tier) |
+| **Wake Word** | Trigger hands-free listening | microWakeWord (on-device, custom "Marvin" model) |
+| **STT** | Audio → text | faster-whisper (local) |
+| **Conversation Agent** | Interpret intent, formulate response | Local 32B-class via Ollama with NR orchestration |
+| **TTS** | Text → audio | Piper local, `en_GB-alan-medium` voice |
+
+Model and hardware rationale is in `architecture/AI_PLATFORM.md`. This doc describes the pipeline structure, not the model choice.
 
 ---
 
-## Conversation Agent: Two-Tier Strategy
+## Persona: Marvin
 
-### Tier 1: Local Ollama (Home-Aware)
+The assistant's personality is **Marvin from The Hitchhiker's Guide to the Galaxy** — the depressive paranoid android. Dry wit, mild existential despair, brain-the-size-of-a-planet condescension delivered with weary politeness. The persona is a deliberate choice for tone enjoyment, not a functional requirement.
 
-**Hosted on:** Edge AI SFF (co-located with Coral TPU vision inference)
+### Persona Lives in the System Prompt
 
-**Handles:** Device control, home state queries, video analysis calendar queries, anything requiring access to home context.
+The persona is implemented entirely in the LLM's system prompt. The voice itself (`en_GB-alan-medium`) is just a neutral British male — clear, slightly formal. The character comes from how the model writes its responses. This separation matters:
 
-**Rationale for Edge AI placement:** HAOS is a locked-down OS — Ollama can only run there via addon in a constrained supervisor environment. The Edge AI box runs Ubuntu with full Docker access. Ollama (LLM inference) and Coral TPU (vision inference) are distinct workloads that coexist without meaningful resource contention. 32GB RAM provides headroom for capable models (13B–32B range).
+- Voice and persona can be tuned independently
+- The persona can be adjusted (more or less dour) without changing voice models
+- Other voice models can substitute later without losing the character
 
-### Tier 2: Cloud LLM (General Purpose)
+### Wake Word: "Marvin"
 
-**Integration:** Extended OpenAI Conversation (HACS) — supports Claude and OpenAI-compatible APIs
+A custom wake word matching the persona. Implementation considerations:
 
-**Handles:** General knowledge queries, tasks that benefit from a capable model but don't need home context.
+- **microWakeWord** on the voice satellite is the target — runs on ESP32-S3 class hardware, on-device detection, only streams audio after activation
+- A community-trained "Marvin" model exists in the HA wakeword collection but has had training quality issues (early versions trained on misspelled phonetic input). A fresh custom-trained model via HA's Colab training notebook may produce better results
+- **openWakeWord** is a fallback path — runs centrally, more model flexibility, but requires continuous audio stream from satellite to server (worse for privacy and bandwidth)
+
+Initial deployment plan: train a custom microWakeWord "Marvin" model, validate detection rate and false-trigger rate over a few days of real use, fall back to openWakeWord if microWakeWord proves insufficient.
 
 ---
 
-## TTS: Google Cloud TTS
+## Conversation Agent
 
-**Selected tier:** Neural2 (sweet spot of quality vs. cost; Studio tier available if Neural2 proves inadequate)
+### Local LLM via Ollama
 
-**Key rationale:** Google Cloud TTS is available both in HA (first-party integration) and to Node-RED via standard HTTP API. A single voice ID and API key means HA Assist responses and Node-RED notification TTS utterances sound identical. Pick the voice once; use it everywhere.
+The conversation agent is a 32B-class model hosted on the dedicated LLM box. Tier rationale, hardware target, and voice latency budget are in `architecture/AI_PLATFORM.md`.
 
-**Credentials:** Store API key in `secrets.json` as `google_tts_api_key`.
+### Orchestration Layer
+
+The LLM does not run in isolation. Memory retrieval (from the conversational memory store), seed knowledge retrieval (from the document store), and tool call dispatch are all handled by an orchestration layer between HA and Ollama.
+
+The orchestrator pattern: HA Assist points at the orchestrator's endpoint instead of Ollama directly. The orchestrator:
+
+1. Receives the prompt from HA Assist
+2. Embeds the query, retrieves relevant memory and seed knowledge from `pgvector`
+3. Assembles the augmented prompt (system prompt + memory block + seed knowledge block + conversation)
+4. Forwards to Ollama
+5. Captures the response and any tool calls
+6. Dispatches tool calls (most via Node-RED → MQTT for HA control; some via direct service calls)
+7. Returns the final response to HA Assist for TTS
+
+This is the same pattern as the previous architecture's "proxy" concept, but the orchestrator can be implemented as a Node-RED HTTP endpoint rather than a separate Python service. See `subsystems/ai/PERSISTENT_MEMORY.md` for full detail on the memory side.
+
+### Hybrid Cloud Routing — Open Question
+
+Routing some queries to a cloud LLM (deep reasoning, niche world knowledge) is a deferred architectural decision. Full discussion in `architecture/AI_PLATFORM.md`. Initial deployment is local-only; hybrid is a lever to pull post-deployment if Tier 2 limitations bite in real use.
+
+---
+
+## TTS: Piper Local
+
+### Why Piper
+
+Piper is the canonical local TTS option in the HA voice ecosystem. CPU-only, fast, lightweight (~30–100MB voice models), good quality at the medium and high voice pack tiers. Runs on `workflow.local` alongside other lightweight services.
+
+Higher-quality options exist (Kokoro, XTTS-v2 with voice cloning) but introduce more compute cost and operational complexity. Piper hits the "good enough you stop noticing it" bar with effectively zero resource cost.
+
+### Voice Selection: `en_GB-alan-medium`
+
+Neutral British male, fits the Marvin persona. **Medium voice pack minimum** — low-quality voice packs stumble on punctuation and emphasis in ways that break immersion. High-quality voice packs are preferred where available for the chosen voice.
+
+### Voice Unification
+
+A single Piper voice serves all TTS sources — HA Assist responses, Node-RED-triggered TTS notifications, proactive conversations. There is no per-caller voice configuration to keep in sync. Whoever calls Piper gets the same Marvin voice.
+
+This was a key rationale for the previous Google Cloud TTS choice; Piper preserves that property while removing the cloud dependency.
 
 ---
 
 ## Satellite Hardware
 
-Satellites handle mic input and speaker output, offloading STT/TTS/inference to the HAOS server via the Wyoming protocol.
+Satellites handle mic input and speaker output, offloading STT/TTS/inference to the LLM box and HA via the Wyoming protocol.
 
-| Device | Quantity | Protocol | Notes |
-|--------|----------|----------|-------|
-| M5Stack ATOM Echo | 2 | Wyoming / ESPHome | Audio-only; good for pipeline validation |
-| Echo Show (Gen 1, NOS) | 1 | Android (post-LineageOS) | Primary experiment unit, unopened |
-| Echo Show 5 | 1 | Android (post-LineageOS) | Secondary experiment unit |
+### Selected Path: HA Voice Preview Edition (Primary)
 
-### Echo Show Experiment
+**HA Voice PE** is the path of least resistance: official HA hardware, ESP32-S3 with mic array and speaker, on-device wake word, Wyoming-native, plug-and-play. Roughly $60/unit. No DIY assembly, no firmware tinkering required for baseline functionality.
 
-**Goal:** Flash LineageOS → install ViewAssist → evaluate as wall-mounted voice+visual satellite
+### Alternative: M5Stack ATOM Echo (DIY / Test)
 
-**Why this matters:** Touchscreen + voice is a significantly better UX than audio-only, particularly for non-ambulatory users. Visual confirmation of responses, ability to display camera feeds, dashboard cards.
+ATOM Echo is the cheap-and-cheerful DIY satellite — ESP32-based, ESPHome integration, more setup work but more customizable. Useful for initial pipeline validation before committing to the Voice PE rollout, and for spaces where the form factor matters.
 
-**Timing:** Post-baseline-infrastructure. Hardware on hand.
+### Parallel Project: Echo Show via LineageOS
 
-**Fallback:** If Echo Show experiment fails or stalls, Android tablets running ViewAssist provide similar UX with less effort. Mic quality will be worse but likely adequate for wall-mounted close-range use.
+Two pairs of Echo Show units (1st gen 2017 original, and 1st gen 2019 "checkers/crown" generation) on hand. The LineageOS port for the 2019 generation is active but has known limitations: HA dashboards run well; **microphone support is partial** — gain is low and recordings can use the wrong sample rate. As voice satellites *today*, they're a science project.
 
-### Target Deployment (If Experiment Succeeds)
+The path forward: HA Companion App on Android already supports microWakeWord on-device. Once the LineageOS mic issues get sorted upstream, Companion App + microWakeWord turns these devices into voice satellites with display surfaces. Until then, they earn their keep as dashboard surfaces (View Assist for visual feedback during voice interactions is worth evaluating).
 
-| Location | Count |
-|----------|-------|
-| Living Room | 1 |
-| Kitchen | 1 |
-| Master Bedroom | 2 (one per nightstand) |
-| Guest Room One | 1 |
-| Guest Room Two | 1 |
-| Office | 1 |
-| **Total** | **7** |
+**Approach:** Run as a parallel workstream. Don't block the main voice deployment on Echo Show readiness. Watch the LineageOS thread for mic fixes; revisit when ready.
 
-Transitional spaces (stairway, hallways) excluded — not worth deploying where no one stops to have a conversation.
+### Target Deployment
 
-**Sourcing note:** Gen 1 Echo Shows are no longer manufactured. eBay and Facebook Marketplace are primary sourcing channels. When experiment is validated and ready to scale, move quickly — units in unbootloaderable states or priced by people who know what they have are an increasing share of available inventory.
+**v1: four rooms covering daily-use surfaces.**
+
+| Location | Count | Rationale |
+|----------|-------|-----------|
+| Living Room | 1 | Primary social/leisure space |
+| Kitchen | 1 | Hands-busy queries (timers, recipes, "what's the temp outside") |
+| Master Bedroom | 1 | Lights/alarm/bedtime routines |
+| Office | 1 | Daytime use during work |
+| **Total** | **4** | |
+
+**v1 cost target:** ~$240 in Voice PE units.
+
+**Future expansion** — driven by observed need:
+- Guest rooms (when frequent guests need voice access)
+- Bathrooms, basement, garage (low priority; surface only if usage justifies)
+
+The kitchen is the room where a display surface earns its keep most clearly — timers, recipe scrollback, weather glance while hands are full. If the Echo Show / LineageOS path matures, kitchen is the natural pilot location for a display+voice satellite.
 
 ---
 
@@ -101,15 +149,26 @@ Transitional spaces (stairway, hallways) excluded — not worth deploying where 
 
 ### House-Initiated Conversations
 
-Assist supports house-initiated (proactive) conversations — a triggering event causes NR (via HA service call) to push a spoken prompt to a satellite, which plays the prompt and then opens its mic and listens for a response.
+The pipeline supports house-initiated (proactive) conversations: a triggering event causes Node-RED to push a spoken prompt to a specific satellite, which plays the prompt and opens its mic to listen for a response.
 
-**Continuing conversations** is a related feature: after an initial wake word trigger and exchange, the satellite remains in listening mode for a follow-up without requiring another wake word.
+**Continuing conversations** — after the initial wake-word trigger, the satellite remains in listening mode for follow-up turns without requiring another wake word.
 
 ### Satellite Targeting
 
-Proactive prompts and TTS announcements target a **specific satellite entity** (e.g., `assist_satellite.living_room`). No broadcast-by-default. NR knows which room an event occurred in and can direct a conversation to the appropriate satellite. This is actually a better model than Alexa/Google — the routing logic is yours, running locally.
+Proactive prompts and TTS announcements target a **specific satellite entity** (e.g., `assist_satellite.living_room`). No broadcast-by-default. NR knows which room an event occurred in (via existing area-aware flows) and directs conversations to the appropriate satellite.
 
-**Accessibility relevance:** For a non-ambulatory user, directing prompts to whichever room she's currently in — rather than broadcasting to the whole house — is a meaningful UX improvement worth designing for from the start.
+**Accessibility consideration:** for users with limited mobility, directing prompts to the room they're currently in — rather than broadcasting to the whole house — is a meaningful UX improvement. Worth designing for from the start, even if v1 deployment doesn't fully exercise it.
+
+### Push vs Pull Patterns
+
+Voice interactions split into two architectural patterns with different needs:
+
+| Pattern | Trigger | Targeting | Example |
+|---------|---------|-----------|---------|
+| **Pull** | User wakes assistant | Wherever the user is | "Marvin, turn off the kitchen lights" |
+| **Push** | NR event | Where the user is, or where the event happened | "The laundry is done. Want a reminder in 30 minutes?" |
+
+Push patterns require **presence-aware targeting** — announcing "the laundry is done" to an empty kitchen is useless. The targeting logic sits in Node-RED, on top of the voice pipeline rather than inside it.
 
 ---
 
@@ -117,41 +176,32 @@ Proactive prompts and TTS announcements target a **specific satellite entity** (
 
 ### NR → TTS directly (most common)
 
-When NR has already determined what needs to be said, it calls `tts.speak` targeting a specific satellite/media player. This bypasses the conversation agent entirely — straight to the TTS engine, same Google Cloud voice.
+When NR has already determined what needs to be said, it calls `tts.speak` targeting a specific satellite/media player. This bypasses the conversation agent entirely — straight to Piper, same Marvin voice.
 
 ### NR triggering a proactive Assist conversation
 
-NR detects a triggering event → calls HA service to initiate a proactive conversation on a specific satellite → satellite speaks the prompt and listens → response flows through the full pipeline.
+NR detects a triggering event → calls HA service to initiate a proactive conversation on a specific satellite → satellite speaks the prompt and listens → response flows through the full pipeline → NR follows through on the response if needed.
 
-Example: NR detects washing machine cycle complete → initiates conversation on nearest satellite → "The laundry is done. Do you want a reminder in 30 minutes to move it?" → response comes back → NR sets the timer.
+Example: NR detects washing machine cycle complete → initiates conversation on nearest satellite where someone is present → "The laundry is done. Do you want a reminder in 30 minutes to move it?" → response routes back through STT and the conversation agent → if "yes", NR sets the reminder.
 
 ### NR → `conversation.process` (less common)
 
-NR can call `conversation.process` to send text directly into the conversation agent and receive a structured response — effectively using Assist as an NLU engine.
+NR can call `conversation.process` to send text directly into the conversation agent and receive a structured response — using Assist as an NLU engine for non-voice flows.
 
 ### Division of Labor
 
-- **NR owns** event detection, triggering logic, satellite targeting
-- **Assist owns** the voice conversation (STT, conversation, TTS)
-- **NR optionally owns** follow-through when the conversation outcome requires MQTT device control or complex automation
+- **NR owns** event detection, triggering logic, satellite targeting, presence awareness
+- **Assist owns** the voice conversation flow (STT → orchestrator → TTS)
+- **Orchestrator owns** memory retrieval, prompt assembly, tool call dispatch
+- **NR owns** follow-through when a conversation outcome requires MQTT device control or scheduled actions
 
 ---
 
-## Deferred: Persistent Memory
+## Persistent Memory Integration
 
-**Status: Blocked — see `subsystems/ai/PERSISTENT_MEMORY.md` for full details.**
+The orchestrator layer is where persistent memory plugs in. Every prompt that flows through the orchestrator gets memory and seed-knowledge augmentation before reaching the LLM. Every response gets evaluated for fact extraction.
 
-**Blockers:**
-1. HA pipeline events (`assist_pipeline_event`) do not propagate to the external WebSocket API or HA event bus. Verified on HA 2026.3.1. Clean per-interaction capture requires NR to own conversation orchestration entirely, talking to Ollama directly.
-2. No viable local LLM inference hardware with GPU acceleration. The Edge AI box PCIe slot is occupied by Coral TPU. CPU-only inference on i7-7700 produces marginal latency for voice use.
-
-*Revisit triggers: HA exposes pipeline events externally, or dedicated LLM inference hardware becomes viable.*
-
----
-
-## Deferred: Wall-Mounted Dashboard / Room Displays
-
-Significant topic, not yet planned. Intersection of satellite hardware selection, per-room dashboard design, accessibility requirements, and ViewAssist integration. Deserves a dedicated planning session.
+Full memory architecture, ingestion mechanics, retrieval flow, and safety framework live in `subsystems/ai/PERSISTENT_MEMORY.md`. The pipeline doc references but does not duplicate that content.
 
 ---
 
@@ -159,23 +209,45 @@ Significant topic, not yet planned. Intersection of satellite hardware selection
 
 All of this follows baseline infrastructure being stable.
 
-1. **Google Cloud TTS** — Configure integration, select voice, validate output quality
-2. **Whisper STT** — Install HA add-on. Enables text or voice input via Companion app; no satellite hardware required yet
-3. **Ollama + Conversation Agent** — Stand up on Edge AI box, wire to Assist pipeline, validate home control and calendar queries via dashboard chat
-4. **ATOM Echo satellites** — Get wake word + full audio pipeline end-to-end
-5. **Echo Show experiment** — LineageOS + ViewAssist; parallel workstream once baseline infra is stable
+1. **Piper TTS** — install on `workflow.local`, select voice pack quality, validate output through HA `tts.speak` and direct API calls from NR
+2. **Whisper STT** — install (HA add-on or standalone Wyoming service), validate via HA Companion App text-to-speech round-trip
+3. **Voice PE satellite (single unit)** — get one room end-to-end with built-in HA conversation agent (no orchestrator yet) to validate the audio pipeline
+4. **Custom Marvin wake word** — train via HA's Colab notebook, deploy to satellite, validate detection rate
+5. **LLM box online** — see `architecture/AI_PLATFORM.md` for hardware path; install Ollama with target 32B model
+6. **Orchestrator layer (v0)** — minimal HTTP endpoint forwarding to Ollama, no memory yet; verify HA Assist reaches it correctly
+7. **Memory layer integration** — see `subsystems/ai/PERSISTENT_MEMORY.md` for full sequence
+8. **Voice PE rollout to remaining v1 rooms** — kitchen, master, office
+9. **Echo Show experiment** — parallel workstream, not blocking, surface as ready
+
+---
+
+## Wall-Mounted Dashboard / Room Displays
+
+Significant topic, not yet planned. Intersection of satellite hardware selection, per-room dashboard design, accessibility requirements, and ViewAssist integration. Deserves a dedicated planning session post-baseline.
 
 ---
 
 ## Open Questions
 
-- [ ] Ollama model selection — which model(s) for home control vs. general use?
-- [ ] Google TTS voice selection — Neural2 vs Studio tier; specific voice ID
-- [ ] Wake word selection (openWakeWord library vs. custom trained)
-- [ ] ATOM Echo placement for initial testing
-- [ ] Echo Show LineageOS build process and any known blockers for Gen 1
-- [ ] Speaker recognition — monitoring [EuleMitKeule/speaker-recognition](https://github.com/EuleMitKeule/speaker-recognition): HA addon using Resemblyzer neural voice embeddings. Trains on audio samples per user, returns speaker name + confidence score. Early project but implementation looks legitimate. If this matures, closes the "who asked?" gap for shared room satellites.
+- [ ] Specific Piper voice pack — confirm `en_GB-alan-medium` is the best fit, evaluate high-quality alternatives
+- [ ] Custom Marvin wake word — train fresh vs adapt community model
+- [ ] Orchestrator implementation — Node-RED HTTP endpoint vs separate Python service vs HA custom integration
+- [ ] STT model size — `small` vs `medium` faster-whisper, run on LLM GPU vs `workflow.local` CPU
+- [ ] Voice PE placement specifics within each room
+- [ ] Echo Show LineageOS mic fix monitoring
+- [ ] Speaker recognition production readiness — monitoring `EuleMitKeule/speaker-recognition` (Resemblyzer-based HA addon)
 
 ---
 
-*Last Updated: 2026-03-26*
+## Related Documents
+
+| Document | Content |
+|----------|---------|
+| `architecture/AI_PLATFORM.md` | LLM tier, hardware, hybrid cloud question, voice latency budget |
+| `subsystems/ai/PERSISTENT_MEMORY.md` | Memory architecture, RAG, knowledge ingestion, safety framework |
+| `architecture/OVERVIEW.md` | Four-box infrastructure, where the LLM box fits |
+| `nodered/NOTIFICATIONS.md` | Notification framework (relevant for Push patterns) |
+
+---
+
+*Last Updated: 2026-05-08*
